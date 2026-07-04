@@ -104,6 +104,64 @@ export NNINTERACTIVE_BACKEND_LOCAL_MODEL_DIR=/data/nninteractive_models/your_mod
 export NNINTERACTIVE_BACKEND_LOCAL_DEVICE=cuda:0
 ```
 
+## 模型下载
+
+是否需要下载模型取决于运行模式：
+
+| 模式 | 是否需要本机模型 | 说明 |
+|---|---|---|
+| `mock` | 否 | 本地联调和单元测试，不跑真实 AI。 |
+| `remote` | 否 | 模型在远端 GPU `nninteractive-server` 上，Unity 后端只做 client。 |
+| `local` | 是 | 本机直接加载 nnInteractive checkpoint，需要模型目录。 |
+
+本地真实推理前，先安装 nnInteractive 及其模型管理依赖，然后下载模型：
+
+```bash
+cd /workspace/backend/nninteractive_service
+python3 scripts/download_model.py --list
+python3 scripts/download_model.py
+```
+
+默认会使用官方 manifest 的默认模型，例如 `nnInteractive_v1.0`，并下载到：
+
+```text
+$NNINTERACTIVE_MODEL_DIR/models/<model_id>/
+```
+
+如果没有设置 `NNINTERACTIVE_MODEL_DIR`，默认是：
+
+```text
+~/.nninteractive/models/<model_id>/
+```
+
+指定模型和模型根目录：
+
+```bash
+python3 scripts/download_model.py nnInteractive_v1.0 --model-root /data/nninteractive_models
+```
+
+下载完成后按脚本输出配置本地后端：
+
+```bash
+export NNINTERACTIVE_BACKEND_ENGINE=local
+export NNINTERACTIVE_BACKEND_LOCAL_MODEL_DIR=/data/nninteractive_models/models/nnInteractive_v1.0
+export NNINTERACTIVE_BACKEND_LOCAL_DEVICE=cuda:0
+```
+
+国内或受限网络环境下，脚本默认使用 `http://127.0.0.1:1080` 作为代理；也可以显式指定：
+
+```bash
+python3 scripts/download_model.py --proxy http://127.0.0.1:1080
+```
+
+不需要代理时：
+
+```bash
+python3 scripts/download_model.py --no-proxy
+```
+
+注意：官方 nnInteractive checkpoint 许可证与代码许可证不同，请按模型目录内 `LICENSE` 和官方说明使用。
+
 ## API 示例
 
 ```bash
