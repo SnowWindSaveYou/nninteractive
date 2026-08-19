@@ -1,0 +1,18 @@
+# requirements-remote.txt
+# remote 模式:转发到官方 nninteractive-server,本机无 GPU、无 torch。
+# 安装:pip install -r requirements-remote.txt
+# 需先启动官方 nninteractive-server 并配置 NNINTERACTIVE_BACKEND_REMOTE_URL。
+
+# 基础服务依赖
+fastapi>=0.110
+uvicorn>=0.27
+pydantic>=2.0
+numpy>=1.24
+
+# NIfTI 读取
+nibabel>=5.0
+
+# 官方 remote client(与 nnInteractive 同版本,2.5.1)
+nninteractive-client==2.5.1
+httpx>=0.27
+blosc2>=4.0

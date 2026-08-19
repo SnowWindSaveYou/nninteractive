@@ -30,11 +30,21 @@ def default_max_series_files() -> int:
     return int(os.environ.get("NNINTERACTIVE_BACKEND_MAX_SERIES_FILES", "2048"))
 
 
+def _looks_like_absolute_path(image_uri: str) -> bool:
+    # Unix absolute: /...
+    if image_uri.startswith("/"):
+        return True
+    # Windows absolute drive path: C:\... or C:/...
+    if len(image_uri) >= 3 and image_uri[1] == ":" and image_uri[0].isalpha() and image_uri[2] in ("\\", "/"):
+        return True
+    return False
+
+
 def uri_to_path(image_uri: str, allowed_roots: list[Path] | None = None) -> Path | None:
     if image_uri.startswith("file://"):
         parsed = urlparse(image_uri)
         path = Path(unquote(parsed.path))
-    elif image_uri.startswith("/"):
+    elif _looks_like_absolute_path(image_uri):
         path = Path(image_uri)
     else:
         return None

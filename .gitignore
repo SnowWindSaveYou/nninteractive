@@ -91,6 +91,7 @@ pip-wheel-metadata/
 /backend/nninteractive_service/data/
 /backend/nninteractive_service/uploads/
 /backend/nninteractive_service/results/
+/backend/nninteractive_service/models/
 /backend/nninteractive_service/.cache/
 *.nii
 *.nii.gz

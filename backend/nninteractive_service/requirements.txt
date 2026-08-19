@@ -1,3 +1,18 @@
+# requirements.txt
+#
+# 三种运行模式,按需安装其中之一:
+#
+#   mock   — 仅 API 联调/单元测试,无真实 AI,无 GPU 依赖。
+#            pip install -r requirements.txt
+#
+#   local  — 本机 GPU 跑真实 nnInteractive 推理(生产用)。
+#            pip install -r requirements-local.txt
+#
+#   remote — 转发到官方 nninteractive-server,本机无 GPU。
+#            pip install -r requirements-remote.txt
+#
+# 本文件 = mock 模式的基础依赖。详见 DEPLOY.md。
+
 fastapi>=0.110
 uvicorn>=0.27
 pydantic>=2.0

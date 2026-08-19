@@ -1,0 +1,30 @@
+# requirements-local.txt
+# local 模式:本机 GPU 跑真实 nnInteractive 推理(生产部署用)。
+# 安装:pip install -r requirements-local.txt
+#
+# ⚠ torch 必须用 cu124 版,不能用默认 PyPI 的 CPU 版。
+#   下方 torch 行带 --index-url,单独装即可;若整体 pip install -r 时
+#   index-url 对其它包也生效(指向 pytorch cu124 源,那里也有这些包)。
+#   装完务必验证:python -c "import torch;print(torch.cuda.is_available())"
+#   详见 DEPLOY.md「坑 1」。
+#
+# torch 2.6.0+cu124 满足 nnInteractive 的约束 (torch>=2.1.2,!=2.9.*)。
+
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+torch==2.6.0+cu124
+
+# 基础服务依赖
+fastapi>=0.110
+uvicorn>=0.27
+pydantic>=2.0
+numpy>=1.24
+
+# NIfTI 读取
+nibabel>=5.0
+
+# nnInteractive 2.5.1(与 nninteractive-client 同版本,作者要求 pinned in lockstep)。
+# 从 GitHub 装,PyPI 上可能没有或版本不同:
+#   pip install "git+https://github.com/MIC-DKFZ/nnInteractive.git@v2.5.1"
+# 国内 clone 慢可改浅克隆本地装,见 DEPLOY.md 步骤 2c。
+# nnInteractive==2.5.1
