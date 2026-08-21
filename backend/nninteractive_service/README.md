@@ -67,7 +67,7 @@ NIfTI 读取需要额外安装：
 pip install nibabel
 ```
 
-路径安全相关环境变量：
+路径安全相关配置（可用环境变量，或在 `.env` 文件中配置，详见 `.env.example` 与 `DEPLOY.md`）：
 
 ```bash
 export NNINTERACTIVE_BACKEND_ALLOWED_DATA_ROOTS=/data/cases,/workspace/backend/nninteractive_service/testdata

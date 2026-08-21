@@ -122,27 +122,47 @@ python scripts/download_model.py nnInteractive_v1.0
 
 下载到 `$NNINTERACTIVE_MODEL_DIR/models/nnInteractive_v1.0/`(默认 `~/.nninteractive/models/`)。
 
-## 步骤 4:环境变量
+## 步骤 4:配置(.env 文件)
+
+服务启动时自动加载 `backend/nninteractive_service/.env`(同目录)。优先级:**真实环境变量 > .env 文件 > 代码默认值**。即 env 变量能覆盖 .env(方便容器化/临时调试),.env 管常规配置。
+
+### 4a. 创建 .env
 
 ```bash
-# Windows (PowerShell)
-$env:NNINTERACTIVE_BACKEND_ENGINE="local"
-$env:NNINTERACTIVE_BACKEND_LOCAL_MODEL_DIR="<绝对路径>\backend\nninteractive_service\models\nnInteractive_v1.0"
-$env:NNINTERACTIVE_BACKEND_LOCAL_DEVICE="cuda:0"
-$env:NNINTERACTIVE_BACKEND_ALLOWED_DATA_ROOTS="<放影像数据的目录>;可多个用逗号"
+cd backend/nninteractive_service
+cp .env.example .env    # Windows: copy .env.example .env
+```
 
-# Linux / Git Bash
-export NNINTERACTIVE_BACKEND_ENGINE=local
-export NNINTERACTIVE_BACKEND_LOCAL_MODEL_DIR=<绝对路径>/backend/nninteractive_service/models/nnInteractive_v1.0
-export NNINTERACTIVE_BACKEND_LOCAL_DEVICE=cuda:0
-export NNINTERACTIVE_BACKEND_ALLOWED_DATA_ROOTS=<放影像数据的目录>
+### 4b. 编辑 .env(关键项)
+
+```ini
+NNINTERACTIVE_BACKEND_ENGINE=local
+NNINTERACTIVE_BACKEND_LOCAL_MODEL_DIR=<绝对路径>/backend/nninteractive_service/models/nnInteractive_v1.0
+NNINTERACTIVE_BACKEND_LOCAL_DEVICE=cuda:0
+
+# 安全白名单:register case 的 image_uri 路径必须落在这些目录下。
+# 逗号分隔。Windows UNC 共享路径直接写双反斜杠,如:
+NNINTERACTIVE_BACKEND_ALLOWED_DATA_ROOTS=\\10.8.83.82\nfs,/workspace
 ```
 
 说明:
-- `ENGINE=local`:用本机 GPU 跑 nnInteractive(另两个选项:`mock` 无 AI 联调用;`remote` 转发到官方 server)。
-- `LOCAL_MODEL_DIR`:模型目录绝对路径。
+- `ENGINE=local`:本机 GPU 跑 nnInteractive(另两个:`mock` 无 AI 联调用;`remote` 转发官方 server)。
+- `LOCAL_MODEL_DIR`:模型目录绝对路径(应含 onnx + plans.json + fold_0/pth)。
 - `LOCAL_DEVICE`:`cuda:0` / `cuda:1` / `cpu`。
-- `ALLOWED_DATA_ROOTS`:**安全限制**,只有这些目录下的影像文件才能被加载。逗号分隔。影像文件路径在 register case 时传入。
+- `ALLOWED_DATA_ROOTS`:**安全限制**,只允许读这些目录下的影像。逗号分隔。UNC 共享盘(如 `\\10.8.83.82\nfs`)直接写,反斜杠无需转义。
+- `.env` 不入 git(.gitignore 已忽略),每台机器各自维护。`.env.example` 是模板(入 git)。
+
+### 4c. 也可用环境变量(可选)
+
+若不改 .env,或想临时覆盖单个参数,仍可用环境变量(优先级高于 .env):
+
+```powershell
+# Windows PowerShell(仅当前会话)
+$env:NNINTERACTIVE_BACKEND_ENGINE = "local"
+$env:NNINTERACTIVE_BACKEND_ALLOWED_DATA_ROOTS = "\\10.8.83.82\nfs"
+```
+
+注意:Windows 改环境变量后,需**重启服务进程**才生效。.env 改动同理(下次启动加载)。
 
 ## 步骤 5:启动服务
 
