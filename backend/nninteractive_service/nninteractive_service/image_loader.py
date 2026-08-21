@@ -34,6 +34,9 @@ def _looks_like_absolute_path(image_uri: str) -> bool:
     # Unix absolute: /...
     if image_uri.startswith("/"):
         return True
+    # Windows UNC path: \\server\share\... or //server/share/...
+    if image_uri.startswith("\\\\") or image_uri.startswith("//"):
+        return True
     # Windows absolute drive path: C:\... or C:/...
     if len(image_uri) >= 3 and image_uri[1] == ":" and image_uri[0].isalpha() and image_uri[2] in ("\\", "/"):
         return True
