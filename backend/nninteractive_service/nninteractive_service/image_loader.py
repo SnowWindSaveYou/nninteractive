@@ -17,9 +17,32 @@ class LoadedImage:
     metadata: ImageMetadata
 
 
+def _normalize_unc(path_str: str) -> str:
+    """Normalize a Windows UNC path string so pathlib treats it as UNC.
+
+    pathlib on Windows only recognizes UNC when it starts with exactly two
+    backslashes (\\\\server\\share). A single leading backslash (\\server\\share,
+    e.g. written naively in .env) is misread as a drive-relative path and
+    resolved against the current drive. Forward-slash UNC (//server/share) is
+    accepted but inconsistent with backslash requests at match time.
+
+    This normalizes UNC inputs (\\\\, \\, //, /  followed by a server name) to
+    \\\\server\\share (two backslashes, rest as-is). Unix absolute paths
+    (/home/x) and Windows drive paths (C:\\data) are returned unchanged.
+    """
+    s = path_str.strip()
+    # Two leading separators: UNC (\\\\ or //)
+    if s[:2] in ("\\\\", "//"):
+        return "\\\\" + s[2:]
+    # Single leading backslash + non-separator: \\server\share mis-typed as \server\share
+    if s.startswith("\\") and len(s) > 1 and s[1] not in ("\\", "/"):
+        return "\\\\" + s[1:]
+    return s
+
+
 def default_allowed_data_roots() -> list[Path]:
     raw = os.environ.get("NNINTERACTIVE_BACKEND_ALLOWED_DATA_ROOTS", "/workspace,/tmp")
-    return [Path(item).expanduser().resolve() for item in raw.split(",") if item.strip()]
+    return [Path(_normalize_unc(item)).expanduser().resolve() for item in raw.split(",") if item.strip()]
 
 
 def default_max_voxels() -> int:
@@ -48,7 +71,7 @@ def uri_to_path(image_uri: str, allowed_roots: list[Path] | None = None) -> Path
         parsed = urlparse(image_uri)
         path = Path(unquote(parsed.path))
     elif _looks_like_absolute_path(image_uri):
-        path = Path(image_uri)
+        path = Path(_normalize_unc(image_uri))
     else:
         return None
     return validate_path(path, allowed_roots)
