@@ -13,85 +13,81 @@
 | `VoxelCoordConverter`(新加) | 物理 mm ↔ 体素 zyx 索引转换 |
 | `NNInteractiveClientExample` | 完整调用示例 |
 
+## 设计原则(确认)
+
+- **插件只提供接口,不实现交互逻辑**。undo 时机、revision 串联、多 segment 编排等由集成方决定。
+- **插件只提供 mask 数据源,不做可视化**。`DownloadedMask`(shapeZYX + dataZYX + Index/Get)是显示数据源,渲染由集成方实现。`NNInteractiveUnityTextureUtil` 仅作示例,非核心。
+- **数据传输只用共享盘**(image_uri 指向 `\\server\share` 路径),不做体积上传接口。
+- **多 segment 留接口空间但不优先**:`CreateSegment` 已天然支持多个,接口够用,不额外封装管理逻辑。
+
 ## 缺口评估(按优先级)
 
 ### P0 — UIH 集成必需
 
-**1. image_uri 仍需服务端可访问的路径,Unity 无法直接上传体积**
-- 现状:`CaseRegisterRequest.image_uri` 是字符串,服务端按路径读文件(共享盘)。
-- 缺口:若 UIH 影像在 Unity 本地内存(非共享盘),无法上传。需要"上传体积"接口(`POST /cases/upload` 收 float32 字节)或在 Unity 侧先写 .npy 到共享盘。
-- 当前共享盘模式可用,但限制了部署灵活性。
+**1. ~~image_uri 仍需服务端可访问的路径~~** — 不做,只支持共享盘模式。
 
-**2. 多 segment / 多结构分割**
-- 现状:`CreateSegment` 支持多个,但 Example 只演示单 segment。
-- 缺口:UIH 放疗通常一次勾画多个 OAR/PTV。需确认多 segment 并发交互、各自 revision 独立性(服务端已支持,客户端封装够用,但缺管理 UI/状态跟踪)。
+**2. ~~多 segment 管理~~** — 不做,接口已支持,留改造空间。
 
-**3. active segment 标记 + 交互路由**
-- 服务端有 `POST /sessions/{id}/active-segment`,客户端**未封装**。
-- 缺口:用户在 Unity 里切换"当前正在画的器官"时,客户端要能设 active segment。
+**3. active segment 标记** ✅ 已补
+- 服务端 `POST /sessions/{id}/active-segment`,客户端已加 `SetActiveSegment`。
 
-### P1 — 交互完整性
+### P1 — 接口完整性(交互逻辑由集成方实现,插件只补齐服务端已有但客户端未封装的接口)
 
-**4. undo / reset 未封装**
-- 服务端有 `undo`、`reset_interactions`,C API 里也有 `nninter_undo`。客户端**未封装**。
-- 缺口:交互式分割必须能撤销上一步点/框。这是核心交互,缺了没法用。
+**4. undo / reset**
+- **重要纠正**:服务端 **没有 undo** —— `service.py` 无 undo 方法,REST 无 undo 路由(C API 的 `nninter_undo` 在 Python 服务端未实现)。要 undo 得服务端先加。
+- reset ✅ 已补:`ResetSegment(clearPrompts, clearMasks)`(清 prompts/masks,非撤销单步)。
+- 若需要真正的 undo(回退上一步),需服务端侧新增 `POST /sessions/{id}/segments/{sid}/undo`。
 
-**5. scribble / lasso / 涂鸦交互未支持**
-- 服务端 C API 有 `add_scribble_interaction` / `add_lasso_interaction`(涂鸦 mask)。
-- REST API(`service.py` `_build_prompt`)当前**只支持 point/box**:`if prompt_type not in ("point", "box"): raise`。
-- 缺口:精细分割常用涂鸦修正。需服务端先扩 prompt 类型,客户端再加 `SubmitScribblePrompt`(传 3D mask)。
+**5. scribble / lasso / 涂鸦交互**
+- **服务端 `_build_prompt` 当前只支持 point/box**:`if prompt_type not in ("point", "box"): raise`。
+- 要支持涂鸦需服务端先扩 prompt 类型 + 接收 3D mask;客户端再封装。当前两端都不支持,非客户端单方面能补。
 
-**6. previous_mask / 增量交互**
-- 服务端 `run_prompts` 支持 `previous_mask`,可在上次结果上追加交互。
-- 客户端 Example 没演示:每次 SubmitPrompt 用 `base_revision` 串联,但下载的 mask 如何回灌成下一次的 previous_mask,封装不够顺。
-- 缺口:提供"在上次分割基础上继续微调"的一站式方法。
+**6. cancel running job** ✅ 已补
+- `CancelJob(jobId)`。interactive 模式下 latest-prompt-wins,取消的 job 结果被丢弃。
 
-**7. WebSocket 事件订阅未封装**
-- 服务端有 `WS /sessions/{id}/events` 推送 job 状态变化。
-- 客户端用轮询(`WaitForJob`)。轮询可行但延迟高、流量大。
-- 缺口:封装 WS 订阅,交互响应更快(尤其多次连续交互)。
+**7. close session** ✅ 已补
+- `CloseSession(sessionId)`(DELETE),释放服务端 GPU 资源。
 
-### P1 — 显示与可视化
+**8. get session / list segments** ✅ 已补
+- `GetSession`(查当前状态)、`ListSegments`(列所有 segment)。供集成方跟踪状态。
 
-**8. mask 显示太简陋**
-- `CreateMaskTextureAlpha` 只画单色半透(红)。多 segment 时无法区分器官。
-- 缺口:按 segment label/color 着色;支持多 mask 叠加显示;和 CT 体数据配准对齐显示(用 origin/spacing/direction 把 mask 放到正确的世界坐标)。
+**9. previous_mask / 增量交互**
+- 服务端 `run_prompts` 支持 `previous_mask`,但 REST `PromptSubmitRequest` 未暴露该字段(只传 prompts + base_revision)。base_revision 串联了 revision,但 previous_mask 显式回灌接口缺。
+- 需服务端侧确认 previous_mask 是否经 revision 自动处理;若需显式传,REST + 客户端都要补。暂搁置。
 
-**9. mask 与 CT 的空间对齐**
-- 现状:Texture3D 按 voxel 索引建,不考虑物理 spacing(各向异性时变形)。
-- 缺口:用 `VoxelCoordConverter` 把 mask 放到 Unity 世界坐标的正确位置 + 缩放,和 CT 体渲染对齐。
+**10. WebSocket 事件订阅**
+- 服务端有 `WS /sessions/{id}/events`。客户端用轮询可行,WS 可后置。
 
-### P2 — 工程健壮性
+### P1 — 可视化(集成方实现,插件不扩)
 
-**10. 无错误恢复 / 断线重连**
-- 网络抖动时请求失败直接 onError,不重试。
-- 缺口:关键请求(register/session/submit)加重试;session 过期后自动重建。
+**11. mask 显示与 CT 对齐** — 由集成方实现。插件提供 `DownloadedMask` 数据源 + `VoxelCoordConverter` 做空间映射,渲染不管。
 
-**11. 无取消能力**
-- 服务端有 `POST /jobs/{id}/cancel` + interactive latest-prompt-wins。客户端**未封装**。
-- 缺口:用户连续点击时,取消上一个正在跑的 job(否则旧结果覆盖新交互)。
+### P2 — 工程健壮性(非优先)
 
-**12. 配置硬编码**
-- Example 里 `baseUrl` 是 Inspector 字段(可改),但无全局配置(超时、轮询间隔、默认 spacing 等)。
-- 缺口:一个 ScriptableObject 配置资产,集中管理服务地址 + 默认参数。
+**12. 错误恢复 / 断线重连** — 非优先
+**13. 无取消能力** ✅ 已补(CancelJob)
+**14. 配置硬编码** — 非优先
+**15. 无单元测试** — 非优先(VoxelCoordConverter 数学可单测,待加)
+**16. DICOM 直读** — 非优先,共享盘放 nifti 即可
 
-**13. 无单元测试**
-- 4 个 Runtime cs 文件无对应测试。`VoxelCoordConverter` 数学逻辑应可纯 C# 单测(不依赖 Unity API 的部分)。
-- 缺口:坐标转换、mask 解码、JSON 构造的测试。
+## 本次已补的客户端接口
 
-**14. DICOM 直读**
-- 现状依赖服务端读 nifti。UIH 原生数据常是 DICOM。
-- 缺口:服务端 image_loader 支持 DICOM series 目录(代码里有 NIfTI series 但 DICOM 需另加),或 Unity 侧转 nifti 后传路径。
+| 方法 | 对应服务端 | 用途 |
+|------|-----------|------|
+| `SetActiveSegment` | POST /sessions/{id}/active-segment | 切换当前交互的 segment |
+| `ResetSegment` | POST .../segments/{sid}/reset | 清 prompts/masks(非 undo) |
+| `CancelJob` | POST /jobs/{id}/cancel | 取消正在跑的 job |
+| `CloseSession` | DELETE /sessions/{id} | 关闭 session 释放 GPU |
+| `GetSession` | GET /sessions/{id} | 查 session 状态 |
+| `ListSegments` | GET /sessions/{id}/segments | 列所有 segment |
+| `SubmitPointPromptWorld` | POST .../prompts | 物理坐标 mm 点 |
+| `SubmitBoxPromptWorld` | POST .../prompts | 物理坐标 mm 框 |
+| `VoxelCoordConverter` | — | mm ↔ 体素索引 |
 
-## 建议优先级
+## 仍缺(需服务端先动)
 
-UIH 能用起来的最小集:**P0 全做 + P1 的 4(undo) + 11(cancel)**。
-- undo/cancel 是交互式分割的刚需,不做的话用户改不动、点错了没法回退。
-- scribble(5)和 WS(7)可后置。
-- 显示(8/9)看 UIH 是否自带渲染 —— 若 UIH 自己渲染 mask,Unity 插件只需拿 mask 数据,8/9 不急。
+- **undo**:服务端无实现,需新增 `POST .../undo` + service 方法。
+- **scribble/lasso**:服务端 `_build_prompt` 限 point/box,需扩 prompt 类型 + 接收 3D mask。
+- **previous_mask 显式回灌**:REST 未暴露该字段,需服务端确认/补充。
 
-## 已完成的改进(本次)
-
-- ✅ `VoxelCoordConverter`:物理 mm ↔ 体素索引,用 nibabel 真值验证
-- ✅ `SubmitPointPromptWorld` / `SubmitBoxPromptWorld`:客户端直接收物理坐标
-- ✅ `SessionImage` 自动缓存:CreateSession 后自动持有 image metadata 供转换
+这三个是服务端能力缺口,客户端无法单方面补齐。

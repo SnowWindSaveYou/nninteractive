@@ -53,6 +53,44 @@ namespace NNInteractiveUnity
             yield return SendJson($"/sessions/{sessionId}/segments", JsonUtility.ToJson(request), onSuccess, onError);
         }
 
+        /// <summary>Set the active segment for a session (which segment new prompts route to).</summary>
+        public IEnumerator SetActiveSegment(string sessionId, string segmentId, Action<SessionResponse> onSuccess, Action<string> onError)
+        {
+            var req = new ActiveSegmentRequest { segment_id = segmentId };
+            yield return SendJson($"/sessions/{sessionId}/active-segment", JsonUtility.ToJson(req), onSuccess, onError);
+        }
+
+        /// <summary>List all segments in a session.</summary>
+        public IEnumerator ListSegments(string sessionId, Action<SegmentListResponse> onSuccess, Action<string> onError)
+        {
+            yield return SendGet($"/sessions/{sessionId}/segments", onSuccess, onError);
+        }
+
+        /// <summary>Reset a segment: optionally clear its prompts and/or masks. Does not undo — clears.</summary>
+        public IEnumerator ResetSegment(string sessionId, string segmentId, bool clearPrompts, bool clearMasks, Action<SegmentResponse> onSuccess, Action<string> onError)
+        {
+            var req = new SegmentResetRequest { clear_prompts = clearPrompts, clear_masks = clearMasks };
+            yield return SendJson($"/sessions/{sessionId}/segments/{segmentId}/reset", JsonUtility.ToJson(req), onSuccess, onError);
+        }
+
+        /// <summary>Query a session's current state (segments, active segment, revision).</summary>
+        public IEnumerator GetSession(string sessionId, Action<SessionResponse> onSuccess, Action<string> onError)
+        {
+            yield return SendGet($"/sessions/{sessionId}", onSuccess, onError);
+        }
+
+        /// <summary>Close and release a session (frees server GPU resources).</summary>
+        public IEnumerator CloseSession(string sessionId, Action<SessionResponse> onSuccess, Action<string> onError)
+        {
+            yield return SendDelete($"/sessions/{sessionId}", onSuccess, onError);
+        }
+
+        /// <summary>Cancel a running job. In interactive mode the latest prompt wins; cancelled results are discarded.</summary>
+        public IEnumerator CancelJob(string jobId, Action<JobResponse> onSuccess, Action<string> onError)
+        {
+            yield return SendJson($"/jobs/{jobId}/cancel", "{}", onSuccess, onError);
+        }
+
         public IEnumerator SubmitPointPrompt(
             string sessionId,
             string segmentId,
@@ -253,6 +291,29 @@ namespace NNInteractiveUnity
                     yield break;
                 }
 
+                try
+                {
+                    onSuccess?.Invoke(JsonUtility.FromJson<T>(req.downloadHandler.text));
+                }
+                catch (Exception ex)
+                {
+                    onError?.Invoke(ex.Message + "\n" + req.downloadHandler.text);
+                }
+            }
+        }
+
+        private IEnumerator SendDelete<T>(string path, Action<T> onSuccess, Action<string> onError)
+        {
+            using (var req = new UnityWebRequest(Url(path), "DELETE"))
+            {
+                req.downloadHandler = new DownloadHandlerBuffer();
+                req.SetRequestHeader("Accept", "application/json");
+                yield return req.SendWebRequest();
+                if (IsError(req))
+                {
+                    onError?.Invoke(ErrorText(req));
+                    yield break;
+                }
                 try
                 {
                     onSuccess?.Invoke(JsonUtility.FromJson<T>(req.downloadHandler.text));

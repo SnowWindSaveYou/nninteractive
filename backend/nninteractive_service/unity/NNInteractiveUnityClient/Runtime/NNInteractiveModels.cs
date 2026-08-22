@@ -64,6 +64,25 @@ namespace NNInteractiveUnity
     }
 
     [Serializable]
+    public class SegmentResetRequest
+    {
+        public bool clear_prompts = true;
+        public bool clear_masks = true;
+    }
+
+    [Serializable]
+    public class ActiveSegmentRequest
+    {
+        public string segment_id;
+    }
+
+    [Serializable]
+    public class SegmentListResponse
+    {
+        public SegmentResponse[] segments;
+    }
+
+    [Serializable]
     public class SegmentResponse
     {
         public string segment_id;
