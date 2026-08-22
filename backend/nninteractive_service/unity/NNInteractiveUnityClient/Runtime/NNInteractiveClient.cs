@@ -12,6 +12,14 @@ namespace NNInteractiveUnity
         public float PollIntervalSeconds { get; set; } = 0.25f;
         public float DefaultTimeoutSeconds { get; set; } = 180f;
 
+        /// <summary>
+        /// Image metadata (origin/spacing/direction/shape) of the current session,
+        /// captured from CreateSession response. Used by the World-coordinate
+        /// prompt overloads to convert mm -> voxel index. Null until a session
+        /// is created.
+        /// </summary>
+        public ImageInfo SessionImage { get; private set; }
+
         public NNInteractiveClient(string baseUrl)
         {
             BaseUrl = baseUrl.TrimEnd('/');
@@ -29,7 +37,15 @@ namespace NNInteractiveUnity
 
         public IEnumerator CreateSession(SessionCreateRequest request, Action<SessionResponse> onSuccess, Action<string> onError)
         {
-            yield return SendJson("/sessions", JsonUtility.ToJson(request), onSuccess, onError);
+            SessionResponse captured = null;
+            yield return SendJson("/sessions", JsonUtility.ToJson(request),
+                res => captured = res,
+                err => { onError?.Invoke(err); });
+            if (captured != null)
+            {
+                SessionImage = captured.image;
+                onSuccess?.Invoke(captured);
+            }
         }
 
         public IEnumerator CreateSegment(string sessionId, SegmentCreateRequest request, Action<SegmentResponse> onSuccess, Action<string> onError)
@@ -61,6 +77,56 @@ namespace NNInteractiveUnity
         {
             var json = BuildBoxPromptJson(baseRevision, box, positive);
             yield return SendJson($"/sessions/{sessionId}/segments/{segmentId}/prompts", json, onSuccess, onError);
+        }
+
+        /// <summary>
+        /// Submit a point prompt using a physical (patient/world) coordinate in mm.
+        /// Requires a session to have been created (uses its image metadata for
+        /// the mm -> voxel conversion). Pass explicit metadata to override.
+        /// </summary>
+        public IEnumerator SubmitPointPromptWorld(
+            string sessionId,
+            string segmentId,
+            int baseRevision,
+            WorldPointXYZ worldPoint,
+            bool positive,
+            Action<JobResponse> onSuccess,
+            Action<string> onError,
+            ImageInfo imageOverride = null)
+        {
+            var img = imageOverride ?? SessionImage;
+            if (img == null)
+            {
+                onError?.Invoke("No session image metadata: call CreateSession first or pass imageOverride.");
+                yield break;
+            }
+            var voxel = VoxelCoordConverter.WorldToVoxelZYX(
+                worldPoint, img.origin_xyz, img.spacing_xyz, img.direction_3x3, img.shape_zyx);
+            yield return SubmitPointPrompt(sessionId, segmentId, baseRevision, voxel, positive, onSuccess, onError);
+        }
+
+        /// <summary>
+        /// Submit a box prompt using a physical (patient/world) bounding box in mm.
+        /// </summary>
+        public IEnumerator SubmitBoxPromptWorld(
+            string sessionId,
+            string segmentId,
+            int baseRevision,
+            WorldBoxXYZ worldBox,
+            bool positive,
+            Action<JobResponse> onSuccess,
+            Action<string> onError,
+            ImageInfo imageOverride = null)
+        {
+            var img = imageOverride ?? SessionImage;
+            if (img == null)
+            {
+                onError?.Invoke("No session image metadata: call CreateSession first or pass imageOverride.");
+                yield break;
+            }
+            var voxel = VoxelCoordConverter.WorldToVoxelBoxZYX(
+                worldBox, img.origin_xyz, img.spacing_xyz, img.direction_3x3, img.shape_zyx);
+            yield return SubmitBoxPrompt(sessionId, segmentId, baseRevision, voxel, positive, onSuccess, onError);
         }
 
         public IEnumerator WaitForJob(string jobId, Action<JobResponse> onSuccess, Action<string> onError, float timeoutSeconds = -1f)
