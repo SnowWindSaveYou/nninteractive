@@ -59,11 +59,24 @@ def create_app() -> FastAPI:
         Exposes only non-sensitive fields (no api_key). Shows the actual
         resolved values so operators can see what .env / env produced.
         """
+        from pathlib import Path
         from .image_loader import default_allowed_data_roots, default_max_voxels
+        service_root = str(Path(__file__).resolve().parent.parent)
+        model_dir = settings.local_model_dir
+        model_dir_check = None
+        if model_dir:
+            p = Path(model_dir)
+            model_dir_check = {
+                "exists": p.is_dir(),
+                "path": str(p.resolve()) if p.exists() else str(p),
+                "contents": sorted(c.name for c in p.iterdir())[:20] if p.is_dir() else [],
+            }
         return {
             "engine": settings.engine,
+            "service_root": service_root,
             "data_dir": str(settings.data_dir),
-            "local_model_dir": settings.local_model_dir,
+            "local_model_dir": model_dir,
+            "local_model_dir_check": model_dir_check,
             "local_device": settings.local_device,
             "remote_server_url": settings.remote_server_url,
             "session_ttl_seconds": settings.session_ttl_seconds,
