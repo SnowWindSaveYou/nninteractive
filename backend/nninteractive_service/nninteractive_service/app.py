@@ -52,6 +52,25 @@ def create_app() -> FastAPI:
             "model": {"name": "nnInteractive", "ready": settings.engine == "mock", "version": "mock" if settings.engine == "mock" else "unknown"},
         }
 
+    @app.get(f"{prefix}/debug/config")
+    def debug_config():
+        """Read-only effective config for deployment troubleshooting.
+
+        Exposes only non-sensitive fields (no api_key). Shows the actual
+        resolved values so operators can see what .env / env produced.
+        """
+        from .image_loader import default_allowed_data_roots, default_max_voxels
+        return {
+            "engine": settings.engine,
+            "data_dir": str(settings.data_dir),
+            "local_model_dir": settings.local_model_dir,
+            "local_device": settings.local_device,
+            "remote_server_url": settings.remote_server_url,
+            "session_ttl_seconds": settings.session_ttl_seconds,
+            "allowed_data_roots": [str(p) for p in default_allowed_data_roots()],
+            "max_voxels": default_max_voxels(),
+        }
+
     @app.post(f"{prefix}/cases/register")
     def register_case(payload: CaseRegisterRequest):
         record = service.register_case(
