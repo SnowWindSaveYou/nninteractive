@@ -81,7 +81,41 @@ byte value = mask.Get(z, y, x);
 Texture3D tex = NNInteractiveUnityTextureUtil.CreateMaskTextureAlpha(mask);
 ```
 
-## 示例
+## Shared-path automatic mask sync
+
+The plugin includes an optional `MaskSyncController` for deployments where the backend and Unity share the mask output directory.
+
+The backend atomically publishes:
+
+```text
+masks/{session_id}/{segment_id}/current.json
+masks/{session_id}/{segment_id}/rev_{revision}.raw.gz
+```
+
+Example setup:
+
+```csharp
+var sync = new MaskSyncController(sharedSegmentDirectory + "/current.json");
+sync.MaskChanged += change =>
+{
+    // The integrating project decides how to update Texture3D, volume rendering, or mesh.
+    Debug.Log($"Mask revision {change.revision}, changed voxels {change.changedVoxelCount}");
+};
+sync.SyncError += Debug.LogError;
+StartCoroutine(sync.Watch());
+```
+
+The controller handles:
+
+- polling `current.json`;
+- monotonic revision checks;
+- reading and decompressing `raw-gzip` masks;
+- validating raw byte length against `shape_zyx`;
+- exposing `changedBBoxZYX` and `changedVoxelCount`.
+
+It does not decide how the mask is rendered. The integrating Unity project owns that policy.
+
+
 
 示例脚本：
 

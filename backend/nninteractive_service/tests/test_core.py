@@ -51,6 +51,39 @@ class CoreServiceTests(unittest.TestCase):
             mask = np.frombuffer(raw, dtype=np.uint8).reshape(record.shape_zyx)
             self.assertEqual(mask[8, 16, 16], 1)
             self.assertGreater(mask.sum(), 1)
+            self.assertEqual(record.changed_bbox_zyx, [[4, 13], [12, 21], [12, 21]])
+            self.assertEqual(record.changed_voxel_count, int(mask.sum()))
+            manifest = Path(record.path).with_name("current.json")
+            self.assertTrue(manifest.exists())
+            self.assertEqual(__import__("json").loads(manifest.read_text())["revision"], 1)
+            self.assertEqual(job.result_changed_bbox_zyx, record.changed_bbox_zyx)
+
+    def test_second_revision_reports_diff_bbox(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = SegmentationService(Storage(Path(tmp)), MockInferenceEngine())
+            service.register_case("case_001", "mock://demo", [16, 32, 32], None, None, None)
+            session = service.create_session("case_001", "tester")
+            segment = service.create_segment(session.session_id, "target", 1, [1, 0, 0, 1])
+            first = service.submit_prompts(
+                session.session_id,
+                segment.segment_id,
+                0,
+                [{"type": "point", "polarity": "positive", "coordinate_system": "zyx_index", "point": [4, 8, 8]}],
+                True,
+            )
+            wait_job(service, first.job_id)
+            second = service.submit_prompts(
+                session.session_id,
+                segment.segment_id,
+                1,
+                [{"type": "point", "polarity": "positive", "coordinate_system": "zyx_index", "point": [10, 24, 24]}],
+                True,
+            )
+            second = wait_job(service, second.job_id)
+            record = service.get_mask(second.result_mask_id)
+            self.assertEqual(record.previous_revision, 1)
+            self.assertEqual(record.changed_bbox_zyx, [[6, 15], [20, 29], [20, 29]])
+            self.assertGreater(record.changed_voxel_count, 0)
 
     def test_revision_conflict(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -75,6 +108,7 @@ class CoreServiceTests(unittest.TestCase):
                     True,
                 )
             self.assertEqual(getattr(ctx.exception, "code", None), "REVISION_CONFLICT")
+
     def test_register_case_from_npy_testdata_and_box_prompt(self):
         testdata = Path(__file__).resolve().parents[1] / "testdata" / "synthetic_sphere_zyx.npy"
         with tempfile.TemporaryDirectory() as tmp:

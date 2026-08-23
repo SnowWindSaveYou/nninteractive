@@ -321,7 +321,16 @@ class SegmentationService:
                         segment.state = SegmentState.READY if segment.current_mask_id else SegmentState.HAS_PROMPTS
                     return
             mask_id = self._id("mask")
-            record = self.storage.save_mask_raw_gzip(mask_id, job.session_id, job.segment_id, revision, mask, job_id)
+            record = self.storage.save_mask_raw_gzip(
+                mask_id,
+                job.session_id,
+                job.segment_id,
+                revision,
+                mask,
+                job_id,
+                previous_mask=previous_mask,
+                previous_revision=job.base_revision if previous_mask is not None else None,
+            )
             with self._lock:
                 self._mask_arrays[mask_id] = mask
                 self.masks[mask_id] = record
@@ -334,6 +343,8 @@ class SegmentationService:
                 job.message = "succeeded"
                 job.result_revision = revision
                 job.result_mask_id = mask_id
+                job.result_changed_bbox_zyx = record.changed_bbox_zyx
+                job.result_changed_voxel_count = record.changed_voxel_count
                 job.finished_at = utc_now()
                 self._publish_event_locked(job.session_id, "job.finished", {
                     "job_id": job.job_id,
@@ -352,6 +363,10 @@ class SegmentationService:
                     "segment_id": segment.segment_id,
                     "revision": revision,
                     "mask_id": mask_id,
+                    "previous_revision": record.previous_revision,
+                    "changed": record.changed_voxel_count > 0,
+                    "changed_bbox_zyx": record.changed_bbox_zyx,
+                    "changed_voxel_count": record.changed_voxel_count,
                 })
         except Exception as exc:  # noqa: BLE001
             with self._lock:

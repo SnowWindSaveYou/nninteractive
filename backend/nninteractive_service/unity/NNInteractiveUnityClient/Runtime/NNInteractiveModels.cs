@@ -110,6 +110,8 @@ namespace NNInteractiveUnity
         public int result_revision;
         public string result_mask_id;
         public string result_mesh_id;
+        public int[][] result_changed_bbox_zyx;
+        public int result_changed_voxel_count;
         public string error_code;
         public string error_message;
         public string created_at;
@@ -126,6 +128,8 @@ namespace NNInteractiveUnity
         public int revision;
         public string mask_id;
         public string mesh_id;
+        public int[][] changed_bbox_zyx;
+        public int changed_voxel_count;
     }
 
     [Serializable]
@@ -141,6 +145,9 @@ namespace NNInteractiveUnity
         public string coordinate_system;
         public string encoding;
         public string path;
+        public int[][] changed_bbox_zyx;
+        public int? previous_revision;
+        public int changed_voxel_count;
         public string created_at;
         public string source_job_id;
         public string[] available_formats;
