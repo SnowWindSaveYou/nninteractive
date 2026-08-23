@@ -102,7 +102,7 @@ def create_app() -> FastAPI:
 
     @app.post(f"{prefix}/sessions")
     def create_session(payload: SessionCreateRequest):
-        return to_dict(service.create_session(case_id=payload.case_id, user_id=payload.user_id))
+        return to_dict(service.create_session(case_id=payload.case_id, user_id=payload.user_id, enable_undo=payload.enable_undo))
 
     @app.get(f"{prefix}/sessions/{{session_id}}")
     def get_session(session_id: str):
@@ -123,6 +123,10 @@ def create_app() -> FastAPI:
     @app.post(f"{prefix}/sessions/{{session_id}}/segments/{{segment_id}}/reset")
     def reset_segment(session_id: str, segment_id: str, payload: SegmentResetRequest):
         return to_dict(service.reset_segment(session_id, segment_id, payload.clear_prompts, payload.clear_masks))
+
+    @app.post(f"{prefix}/sessions/{{session_id}}/segments/{{segment_id}}/undo")
+    def undo_segment(session_id: str, segment_id: str):
+        return to_dict(service.undo_segment(session_id, segment_id))
 
     @app.post(f"{prefix}/sessions/{{session_id}}/active-segment")
     def set_active_segment(session_id: str, payload: dict):

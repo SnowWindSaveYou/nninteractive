@@ -73,7 +73,7 @@ class SegmentationService:
             raise not_found("case", case_id)
         return record
 
-    def create_session(self, case_id: str, user_id: str | None) -> SessionRecord:
+    def create_session(self, case_id: str, user_id: str | None, enable_undo: bool = True) -> SessionRecord:
         case = self.get_case(case_id)
         session_id = self._id("sess")
         record = SessionRecord(
@@ -82,6 +82,7 @@ class SegmentationService:
             user_id=user_id,
             state=SessionState.READY,
             image=case.image,
+            enable_undo=enable_undo,
         )
         self.engine.create_session(InferenceContext(session_id=session_id, case_id=case_id, image_uri=case.image_uri, image=case.image))
         with self._lock:
@@ -162,9 +163,67 @@ class SegmentationService:
             segment.latest_job_id = None
             segment.latest_request_seq += 1
             self._cancel_segment_jobs_locked(segment, exclude_job_id=None)
+            segment.undo_stack.clear()
             segment.updated_at = utc_now()
             session.updated_at = utc_now()
         return segment
+
+    def undo_segment(self, session_id: str, segment_id: str) -> SegmentRecord:
+        """Undo the most recent successful interaction on a segment.
+
+        Restores the previous mask/revision from the per-segment undo stack
+        (no re-inference). Refuses while a job is running for the segment —
+        cancel it first. Returns the updated segment. Raises conflict if
+        nothing to undo.
+        """
+        session = self.get_session(session_id)
+        segment = self.get_segment(session_id, segment_id)
+        with self._lock:
+            if segment.state == SegmentState.INFERENCING:
+                raise conflict("SEGMENT_BUSY", "cannot undo while a job is running; cancel it first",
+                               {"segment_id": segment_id, "state": segment.state.value})
+            if not segment.undo_stack:
+                raise conflict("NOTHING_TO_UNDO", "no interactions to undo",
+                               {"segment_id": segment_id, "undo_depth": 0})
+            snapshot = segment.undo_stack.pop()
+            segment.current_mask_id = snapshot["mask_id"]
+            segment.current_revision = snapshot["revision"]
+            # Trim prompts back to the count captured in the snapshot.
+            prompt_count = snapshot.get("prompt_count", len(segment.prompts))
+            del segment.prompts[prompt_count:]
+            segment.state = SegmentState.READY if segment.current_mask_id else SegmentState.EMPTY
+            segment.latest_request_seq += 1
+            segment.updated_at = utc_now()
+            session.updated_at = utc_now()
+            self._publish_event_locked(session_id, "segment.updated", {
+                "segment_id": segment.segment_id,
+                "state": segment.state.value,
+                "current_revision": segment.current_revision,
+                "current_mask_id": segment.current_mask_id,
+                "undo_depth": len(segment.undo_stack),
+            })
+            if segment.current_mask_id:
+                self._publish_event_locked(session_id, "mask.ready", {
+                    "segment_id": segment.segment_id,
+                    "revision": segment.current_revision,
+                    "mask_id": segment.current_mask_id,
+                })
+        return segment
+
+    def _push_undo_locked(self, segment: SegmentRecord) -> None:
+        """Snapshot current segment state onto its undo stack before a change.
+        No-op if the session has undo disabled (integration-managed history)."""
+        session = self.sessions.get(segment.session_id)
+        if session is not None and not session.enable_undo:
+            return
+        segment.undo_stack.append({
+            "mask_id": segment.current_mask_id,
+            "revision": segment.current_revision,
+            "prompt_count": len(segment.prompts),
+        })
+        # Drop oldest beyond the limit.
+        while len(segment.undo_stack) > segment.undo_limit:
+            segment.undo_stack.pop(0)
 
     def submit_prompts(
         self,
@@ -325,6 +384,10 @@ class SegmentationService:
             with self._lock:
                 self._mask_arrays[mask_id] = mask
                 self.masks[mask_id] = record
+                # Push current state onto the per-segment undo stack BEFORE
+                # overwriting it, so undo can restore it. Snapshot the prompt
+                # count so undo can also trim segment.prompts back consistently.
+                self._push_undo_locked(segment)
                 segment.current_revision = revision
                 segment.current_mask_id = mask_id
                 segment.state = SegmentState.READY
@@ -504,4 +567,12 @@ class SegmentationService:
 
 
 def to_dict(obj):
+    if isinstance(obj, SegmentRecord):
+        d = asdict(obj)
+        # Don't leak the internal undo stack; expose only undo-ability.
+        d.pop("undo_stack", None)
+        d.pop("undo_limit", None)
+        d["can_undo"] = len(obj.undo_stack) > 0
+        d["undo_depth"] = len(obj.undo_stack)
+        return d
     return asdict(obj)

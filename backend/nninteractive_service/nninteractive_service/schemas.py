@@ -18,6 +18,7 @@ class SessionCreateRequest(BaseModel):
     case_id: str
     user_id: str | None = None
     mode: str = "nninteractive"
+    enable_undo: bool = True
     options: dict[str, Any] = Field(default_factory=dict)
 
 

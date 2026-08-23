@@ -34,9 +34,8 @@
 ### P1 — 接口完整性(交互逻辑由集成方实现,插件只补齐服务端已有但客户端未封装的接口)
 
 **4. undo / reset**
-- **重要纠正**:服务端 **没有 undo** —— `service.py` 无 undo 方法,REST 无 undo 路由(C API 的 `nninter_undo` 在 Python 服务端未实现)。要 undo 得服务端先加。
+- **undo ✅ 已实现**(服务层 per-segment 自管,不依赖 nnInteractive 原生 undo —— engine session 是 per-session 共享,nnInteractive 单层 undo 跨 segment 会乱)。存历史 mask 快照(复用 mask_id 引用,零额外内存),多层(默认 10,`SegmentRecord.undo_limit` 可配),撤销瞬时无重推理。`POST /sessions/{id}/segments/{sid}/undo`,客户端 `UndoSegment`。正在推理时拒绝(先 cancel)。
 - reset ✅ 已补:`ResetSegment(clearPrompts, clearMasks)`(清 prompts/masks,非撤销单步)。
-- 若需要真正的 undo(回退上一步),需服务端侧新增 `POST /sessions/{id}/segments/{sid}/undo`。
 
 **5. scribble / lasso / 涂鸦交互**
 - **服务端 `_build_prompt` 当前只支持 point/box**:`if prompt_type not in ("point", "box"): raise`。

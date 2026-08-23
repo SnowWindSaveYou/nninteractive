@@ -88,6 +88,14 @@ class SegmentRecord:
     latest_job_id: str | None = None
     latest_request_seq: int = 0
     prompts: list[PromptRecord] = field(default_factory=list)
+    # Undo stack of historical (mask_id, revision, prompt_count_before) snapshots,
+    # per-segment. The nnInteractive engine session is shared across segments so
+    # its native single-level undo can't disambiguate which segment to revert —
+    # we manage undo ourselves. Stack bottom = oldest, top = most recent.
+    # Each entry is pushed BEFORE a successful submit overwrites current_mask_id,
+    # so undo pops the top and restores that state. See service.undo_segment.
+    undo_stack: list[dict] = field(default_factory=list)
+    undo_limit: int = 10
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 
@@ -101,6 +109,7 @@ class SessionRecord:
     image: ImageMetadata
     segments: dict[str, SegmentRecord] = field(default_factory=dict)
     active_segment_id: str | None = None
+    enable_undo: bool = True
     event_sequence: int = 0
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)

@@ -73,6 +73,15 @@ namespace NNInteractiveUnity
             yield return SendJson($"/sessions/{sessionId}/segments/{segmentId}/reset", JsonUtility.ToJson(req), onSuccess, onError);
         }
 
+        /// <summary>Undo the most recent successful interaction on a segment. Restores the previous
+        /// mask/revision from a server-side snapshot (no re-inference). Refuses while a job is running
+        /// for the segment — cancel it first. Returns the updated segment (check result_mask_id /
+        /// current_mask_id for the restored mask).</summary>
+        public IEnumerator UndoSegment(string sessionId, string segmentId, Action<SegmentResponse> onSuccess, Action<string> onError)
+        {
+            yield return SendJson($"/sessions/{sessionId}/segments/{segmentId}/undo", "{}", onSuccess, onError);
+        }
+
         /// <summary>Query a session's current state (segments, active segment, revision).</summary>
         public IEnumerator GetSession(string sessionId, Action<SessionResponse> onSuccess, Action<string> onError)
         {

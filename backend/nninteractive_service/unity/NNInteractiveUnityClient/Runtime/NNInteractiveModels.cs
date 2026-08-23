@@ -40,6 +40,7 @@ namespace NNInteractiveUnity
         public string case_id;
         public string user_id;
         public string mode = "nninteractive";
+        public bool enable_undo = true;
     }
 
     [Serializable]
@@ -93,6 +94,8 @@ namespace NNInteractiveUnity
         public string state;
         public int current_revision;
         public string current_mask_id;
+        public bool can_undo;
+        public int undo_depth;
         public string created_at;
         public string updated_at;
     }
