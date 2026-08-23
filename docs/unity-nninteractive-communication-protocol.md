@@ -718,7 +718,10 @@ Succeeded：
     "segment_id": "seg_001",
     "revision": 1,
     "mask_id": "mask_001",
-    "mesh_id": null
+    "mesh_id": null,
+    "changed": true,
+    "changed_bbox_zyx": [[40, 90], [120, 240], [100, 220]],
+    "changed_voxel_count": 186432
   }
 }
 ```
@@ -810,7 +813,10 @@ GET /masks/{mask_id}/metadata
   "dtype": "uint8",
   "layout": "zyx",
   "coordinate_system": "zyx_index",
-  "available_formats": ["raw-gzip"]
+  "available_formats": ["raw-gzip"],
+  "changed_bbox_zyx": [[40, 90], [120, 240], [100, 220]],
+  "previous_revision": 0,
+  "changed_voxel_count": 186432
 }
 ```
 
@@ -862,7 +868,52 @@ Content-Type: image/png
 
 Body 为单通道或 RGBA PNG。
 
-### 12.4 NIfTI Labelmap 导出
+### 12.5 Shared-path current manifest
+
+当后端和 Unity 共享 mask 目录时，每个 segment 目录会原子发布：
+
+```text
+masks/{session_id}/{segment_id}/current.json
+masks/{session_id}/{segment_id}/rev_{revision}.raw.gz
+```
+
+`current.json` 示例：
+
+```json
+{
+  "mask_id": "mask_002",
+  "revision": 2,
+  "previous_revision": 1,
+  "shape_zyx": [160, 512, 512],
+  "dtype": "uint8",
+  "layout": "zyx",
+  "encoding": "raw-gzip",
+  "path": "rev_2.raw.gz",
+  "changed_bbox_zyx": [[40, 90], [120, 240], [100, 220]],
+  "changed_voxel_count": 186432
+}
+```
+
+发布顺序：
+
+1. 写临时 raw 文件并完成关闭。
+2. 原子改名为 `rev_{revision}.raw.gz`。
+3. 写并原子改名 revision metadata。
+4. 最后写并原子替换 `current.json`。
+
+Unity 不应通过扫描目录猜测最新 mask，而应读取 `current.json` 并按 `revision` 单调更新。
+
+`changed_bbox_zyx` 使用半开区间：
+
+```text
+[z_min, z_max)
+[y_min, y_max)
+[x_min, x_max)
+```
+
+---
+
+### 12.6 NIfTI Labelmap 导出
 
 不属于当前 mask 输出范围。当前 mask 下载只要求 `raw-gzip uint8[Z,Y,X]`；如后续需要 NIfTI labelmap / DICOM SEG / RTSTRUCT，用单独 export API 设计。
 

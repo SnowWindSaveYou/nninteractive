@@ -191,7 +191,7 @@ namespace NNInteractiveUnity
                     yield break;
                 }
 
-                if (job != null && (job.state == "succeeded" || job.state == "failed" || job.state == "canceled"))
+                if (job != null && (job.state == "succeeded" || job.state == "failed" || job.state == "canceled" || job.state == "stale"))
                 {
                     onSuccess?.Invoke(job);
                     yield break;
