@@ -144,6 +144,7 @@ def create_app() -> FastAPI:
                 "mask_id": job.result_mask_id,
                 "mesh_id": job.result_mesh_id,
                 "changed_bbox_zyx": job.result_changed_bbox_zyx,
+                "changed_bbox_zyx_flat": job.result_changed_bbox_zyx_flat,
                 "changed_voxel_count": job.result_changed_voxel_count,
             }
         return body

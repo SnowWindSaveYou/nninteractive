@@ -111,6 +111,7 @@ namespace NNInteractiveUnity
         public string result_mask_id;
         public string result_mesh_id;
         public int[][] result_changed_bbox_zyx;
+        public int[] result_changed_bbox_zyx_flat;
         public int result_changed_voxel_count;
         public string error_code;
         public string error_message;
@@ -129,6 +130,7 @@ namespace NNInteractiveUnity
         public string mask_id;
         public string mesh_id;
         public int[][] changed_bbox_zyx;
+        public int[] changed_bbox_zyx_flat;
         public int changed_voxel_count;
     }
 
@@ -146,6 +148,7 @@ namespace NNInteractiveUnity
         public string encoding;
         public string path;
         public int[][] changed_bbox_zyx;
+        public int[] changed_bbox_zyx_flat;
         public int? previous_revision;
         public int changed_voxel_count;
         public string created_at;

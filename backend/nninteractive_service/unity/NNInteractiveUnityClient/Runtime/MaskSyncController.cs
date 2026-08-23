@@ -25,6 +25,7 @@ namespace NNInteractiveUnity
             public string encoding;
             public string path;
             public int[][] changed_bbox_zyx;
+            public int[] changed_bbox_zyx_flat;
             public int changed_voxel_count;
         }
 
@@ -62,6 +63,20 @@ namespace NNInteractiveUnity
                 TrySyncOnce();
                 yield return new WaitForSeconds(PollIntervalSeconds);
             }
+        }
+
+        private static int[][] ToBBox(int[] flat, int[][] fallback)
+        {
+            if (flat == null || flat.Length != 6)
+            {
+                return fallback;
+            }
+            return new[]
+            {
+                new[] { flat[0], flat[1] },
+                new[] { flat[2], flat[3] },
+                new[] { flat[4], flat[5] }
+            };
         }
 
         public bool TrySyncOnce()
@@ -111,7 +126,7 @@ namespace NNInteractiveUnity
                     revision = manifest.revision,
                     previousRevision = manifest.previous_revision,
                     shapeZYX = manifest.shape_zyx,
-                    changedBBoxZYX = manifest.changed_bbox_zyx,
+                    changedBBoxZYX = ToBBox(manifest.changed_bbox_zyx_flat, manifest.changed_bbox_zyx),
                     changedVoxelCount = manifest.changed_voxel_count,
                     mask = downloaded
                 });

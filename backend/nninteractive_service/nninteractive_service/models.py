@@ -120,6 +120,7 @@ class JobRecord:
     result_revision: int | None = None
     result_mask_id: str | None = None
     result_changed_bbox_zyx: list[list[int]] | None = None
+    result_changed_bbox_zyx_flat: list[int] | None = None
     result_changed_voxel_count: int = 0
     result_mesh_id: str | None = None
     error_code: str | None = None
@@ -142,6 +143,7 @@ class MaskRecord:
     encoding: str
     path: str
     changed_bbox_zyx: list[list[int]] | None = None
+    changed_bbox_zyx_flat: list[int] | None = None
     previous_revision: int | None = None
     changed_voxel_count: int = 0
     created_at: str = field(default_factory=utc_now)

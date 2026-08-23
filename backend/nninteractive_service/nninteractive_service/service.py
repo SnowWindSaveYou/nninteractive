@@ -344,6 +344,7 @@ class SegmentationService:
                 job.result_revision = revision
                 job.result_mask_id = mask_id
                 job.result_changed_bbox_zyx = record.changed_bbox_zyx
+                job.result_changed_bbox_zyx_flat = record.changed_bbox_zyx_flat
                 job.result_changed_voxel_count = record.changed_voxel_count
                 job.finished_at = utc_now()
                 self._publish_event_locked(job.session_id, "job.finished", {
@@ -366,6 +367,7 @@ class SegmentationService:
                     "previous_revision": record.previous_revision,
                     "changed": record.changed_voxel_count > 0,
                     "changed_bbox_zyx": record.changed_bbox_zyx,
+                    "changed_bbox_zyx_flat": record.changed_bbox_zyx_flat,
                     "changed_voxel_count": record.changed_voxel_count,
                 })
         except Exception as exc:  # noqa: BLE001
