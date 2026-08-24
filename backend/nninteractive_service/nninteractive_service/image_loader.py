@@ -66,10 +66,28 @@ def _looks_like_absolute_path(image_uri: str) -> bool:
     return False
 
 
+def _from_file_uri(image_uri: str) -> str:
+    """Extract a usable path string from a file:// URI.
+
+    Standard file URLs put the host in the authority (file://host/path); for
+    those we map to \\\\host\\path. Callers in this project also pass UNC paths
+    with a file:// prefix in several inconsistent slash forms
+    (file://///host/share, file:////host/share, file:///host/share) where
+    urlparse is unreliable. For those we strip "file://" and normalize the
+    remainder as a UNC path.
+    """
+    parsed = urlparse(image_uri)
+    if parsed.netloc and parsed.path:
+        # standard file://host/path
+        return "\\\\" + parsed.netloc + parsed.path
+    # UNC-with-prefix forms: strip "file://", collapse leading slashes to "//"
+    rest = image_uri[len("file://"):].lstrip("/")
+    return _normalize_unc("//" + rest)
+
+
 def uri_to_path(image_uri: str, allowed_roots: list[Path] | None = None) -> Path | None:
     if image_uri.startswith("file://"):
-        parsed = urlparse(image_uri)
-        path = Path(unquote(parsed.path))
+        path = Path(unquote(_from_file_uri(image_uri)))
     elif _looks_like_absolute_path(image_uri):
         path = Path(_normalize_unc(image_uri))
     else:
