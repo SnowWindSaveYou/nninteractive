@@ -52,7 +52,13 @@ yield return client.DownloadMaskRawGzip(maskId, OnMask, OnError);
 [z, y, x]
 ```
 
-Unity world/local 坐标需要由项目自身的 volume renderer 转换为 voxel index 后再传入。
+推荐优先使用 `SubmitPointPrompt` / `SubmitBoxPrompt` 直接传 `VoxelPointZYX` / `VoxelBoxZYX`。
+
+若使用 `SubmitPointPromptWorld` / `SubmitBoxPromptWorld`：
+
+- 输入应为**后端 image metadata 对应的物理坐标系（通常 patient LPS, mm）**；
+- 不应直接把未经语义确认的 Unity scene world 坐标传入；
+- 建议由接入层统一完成 world↔patient↔voxel 的映射策略（包含必要的轴镜像/导入差异处理）。
 
 ## Mask 数据
 
@@ -139,3 +145,21 @@ Samples/NNInteractiveClientExample.cs
 - `serverImageUri` 是后端可访问的路径，不是 Unity 客户端本地路径。
 - 对真实 `.npy`/NIfTI/DICOM 数据，文件应位于后端服务器可读取的位置。
 - 若使用 remote nnInteractive server，Unity 仍只连接本项目后端，不直接连接官方 nnInteractive server。
+
+### Prompt 调用注意事项（强烈建议）
+
+1. **同一 `segmentId` 串行化提交**  
+    避免并发提交多个 prompt 到同一 segment。高频点击时建议在接入层实现「latest-request-wins」。
+
+2. **新请求前取消旧 job（同 segment）**  
+    使用 `CancelJob(jobId, ...)` 做 best-effort 取消，减少后端无效推理与结果抖动。
+
+3. **严格使用最新 `base_revision`**  
+    每次提交使用当前 segment 最新 revision；旧 revision 返回结果应视为 stale 并丢弃。
+
+4. **结果应用要做版本保护**  
+    `WaitForJob` 返回后，建议再次校验是否仍为当前最新请求，避免旧结果晚到覆盖新结果。
+
+5. **坐标转换职责单一化**  
+    项目内只保留一条权威转换链路（例如：UI点击 -> 项目坐标 -> backend voxel）。
+    不要在多层重复做坐标翻转或单位换算，避免“看起来对，物理上错位”。

@@ -76,6 +76,19 @@ namespace NNInteractiveUnity
         }
 
         /// <summary>
+        /// Convert a physical XYZ point (mm) to floating voxel IJK before clamp.
+        /// IJK order is [x, y, z] in native volume index space.
+        /// </summary>
+        public static float[] WorldToVoxelIJKUnclamped(
+            WorldPointXYZ world,
+            float[] origin_xyz,
+            float[] spacing_xyz,
+            float[] direction_3x3)
+        {
+            return WorldToVoxelIJK(world, origin_xyz, spacing_xyz, direction_3x3);
+        }
+
+        /// <summary>
         /// Convert a physical XYZ box (mm) to a voxel ZYX box, clamped to bounds.
         /// </summary>
         public static VoxelBoxZYX WorldToVoxelBoxZYX(

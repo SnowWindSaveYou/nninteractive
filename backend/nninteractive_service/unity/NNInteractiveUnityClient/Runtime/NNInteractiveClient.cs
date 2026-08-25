@@ -38,8 +38,8 @@ namespace NNInteractiveUnity
         public IEnumerator CreateSession(SessionCreateRequest request, Action<SessionResponse> onSuccess, Action<string> onError)
         {
             SessionResponse captured = null;
-            yield return SendJson("/sessions", JsonUtility.ToJson(request),
-                res => captured = res,
+            yield return SendJson<SessionResponse>("/sessions", JsonUtility.ToJson(request),
+                res => { captured = res; },
                 err => { onError?.Invoke(err); });
             if (captured != null)
             {
@@ -109,6 +109,8 @@ namespace NNInteractiveUnity
             Action<JobResponse> onSuccess,
             Action<string> onError)
         {
+            // DEBUG (disabled): prompt payload trace.
+            // Debug.Log($"[NNInteractiveClient] SubmitPointPrompt -> session={sessionId}, segment={segmentId}, baseRev={baseRevision}, voxelZYX=({point.z},{point.y},{point.x}), positive={positive}");
             var json = BuildPointPromptJson(baseRevision, point, positive);
             yield return SendJson($"/sessions/{sessionId}/segments/{segmentId}/prompts", json, onSuccess, onError);
         }
@@ -122,6 +124,8 @@ namespace NNInteractiveUnity
             Action<JobResponse> onSuccess,
             Action<string> onError)
         {
+            // DEBUG (disabled): prompt payload trace.
+            // Debug.Log($"[NNInteractiveClient] SubmitBoxPrompt -> session={sessionId}, segment={segmentId}, baseRev={baseRevision}, voxelBoxZYX=[z:{box.zMin}..{box.zMax}, y:{box.yMin}..{box.yMax}, x:{box.xMin}..{box.xMax}], positive={positive}");
             var json = BuildBoxPromptJson(baseRevision, box, positive);
             yield return SendJson($"/sessions/{sessionId}/segments/{segmentId}/prompts", json, onSuccess, onError);
         }
@@ -147,8 +151,12 @@ namespace NNInteractiveUnity
                 onError?.Invoke("No session image metadata: call CreateSession first or pass imageOverride.");
                 yield break;
             }
+            var ijk = VoxelCoordConverter.WorldToVoxelIJKUnclamped(
+                worldPoint, img.origin_xyz, img.spacing_xyz, img.direction_3x3);
             var voxel = VoxelCoordConverter.WorldToVoxelZYX(
                 worldPoint, img.origin_xyz, img.spacing_xyz, img.direction_3x3, img.shape_zyx);
+            // DEBUG (disabled): world->voxel conversion trace.
+            // Debug.Log($"[NNInteractiveClient] SubmitPointPromptWorld -> worldXYZ(mm)=({worldPoint.x:F3},{worldPoint.y:F3},{worldPoint.z:F3}) => ijkRaw=({ijk[0]:F2},{ijk[1]:F2},{ijk[2]:F2}) => voxelZYX(clamped)=({voxel.z},{voxel.y},{voxel.x}), shapeZYX=({img.shape_zyx[0]},{img.shape_zyx[1]},{img.shape_zyx[2]}), originXYZ=({img.origin_xyz[0]:F2},{img.origin_xyz[1]:F2},{img.origin_xyz[2]:F2}), spacingXYZ=({img.spacing_xyz[0]:F3},{img.spacing_xyz[1]:F3},{img.spacing_xyz[2]:F3})");
             yield return SubmitPointPrompt(sessionId, segmentId, baseRevision, voxel, positive, onSuccess, onError);
         }
 
@@ -171,8 +179,16 @@ namespace NNInteractiveUnity
                 onError?.Invoke("No session image metadata: call CreateSession first or pass imageOverride.");
                 yield break;
             }
+            var lo = VoxelCoordConverter.WorldToVoxelIJKUnclamped(
+                new WorldPointXYZ(worldBox.xMin, worldBox.yMin, worldBox.zMin),
+                img.origin_xyz, img.spacing_xyz, img.direction_3x3);
+            var hi = VoxelCoordConverter.WorldToVoxelIJKUnclamped(
+                new WorldPointXYZ(worldBox.xMax, worldBox.yMax, worldBox.zMax),
+                img.origin_xyz, img.spacing_xyz, img.direction_3x3);
             var voxel = VoxelCoordConverter.WorldToVoxelBoxZYX(
                 worldBox, img.origin_xyz, img.spacing_xyz, img.direction_3x3, img.shape_zyx);
+            // DEBUG (disabled): world-box->voxel-box conversion trace.
+            // Debug.Log($"[NNInteractiveClient] SubmitBoxPromptWorld -> worldBoxXYZ(mm)=[x:{worldBox.xMin:F3}..{worldBox.xMax:F3}, y:{worldBox.yMin:F3}..{worldBox.yMax:F3}, z:{worldBox.zMin:F3}..{worldBox.zMax:F3}] => ijkRawLo=({lo[0]:F2},{lo[1]:F2},{lo[2]:F2}), ijkRawHi=({hi[0]:F2},{hi[1]:F2},{hi[2]:F2}) => voxelBoxZYX(clamped)=[z:{voxel.zMin}..{voxel.zMax}, y:{voxel.yMin}..{voxel.yMax}, x:{voxel.xMin}..{voxel.xMax}]");
             yield return SubmitBoxPrompt(sessionId, segmentId, baseRevision, voxel, positive, onSuccess, onError);
         }
 
@@ -183,7 +199,7 @@ namespace NNInteractiveUnity
             {
                 JobResponse job = null;
                 string error = null;
-                yield return GetJob(jobId, j => job = j, e => error = e);
+                yield return GetJob(jobId, j => { job = j; }, e => { error = e; });
 
                 if (!string.IsNullOrEmpty(error))
                 {
@@ -231,6 +247,19 @@ namespace NNInteractiveUnity
                     var shape = NNInteractiveMaskCodec.ParseShapeZYX(req.GetResponseHeader("X-Mask-Shape-ZYX"));
                     NNInteractiveMaskCodec.ValidateRawMaskLength(raw, shape);
                     var revisionHeader = req.GetResponseHeader("X-Mask-Revision");
+                    // Flip X and Y to match Unity-internal voxel layout.
+                    //
+                    // The backend stores the mask in the same layout as the source
+                    // NIfTI (C-order ZYX, x fastest). NiftiImporter flips X and Y
+                    // when loading the volume into Unity (it reverses each slice to
+                    // undo TPS Java's reverse pixel writing), so Unity-internal
+                    // voxel (x,y,z) corresponds to NIfTI voxel (dimX-1-x,
+                    // dimY-1-y, z). Without this flip the mask would be mirrored
+                    // in X and Y relative to the Unity volume.
+                    //
+                    // Done here (in the plugin) so all callers receive a mask that
+                    // already matches Unity's voxel layout.
+                    raw = FlipXY(raw, shape);
                     var result = new DownloadedMask
                     {
                         maskId = req.GetResponseHeader("X-Mask-Id") ?? maskId,
@@ -245,6 +274,27 @@ namespace NNInteractiveUnity
                     onError?.Invoke(ex.Message);
                 }
             }
+        }
+
+        private byte[] FlipXY(byte[] raw, int[] shape)
+        {
+            var zDim = shape[0];
+            var yDim = shape[1];
+            var xDim = shape[2];
+            var flipped = new byte[raw.Length];
+            for (int z = 0; z < zDim; z++)
+            {
+                for (int y = 0; y < yDim; y++)
+                {
+                    for (int x = 0; x < xDim; x++)
+                    {
+                        int srcIndex = z * yDim * xDim + y * xDim + x;
+                        int dstIndex = z * yDim * xDim + (yDim - 1 - y) * xDim + (xDim - 1 - x);
+                        flipped[dstIndex] = raw[srcIndex];
+                    }
+                }
+            }
+            return flipped;
         }
 
         private IEnumerator SendGet<T>(string path, Action<T> onSuccess, Action<string> onError)

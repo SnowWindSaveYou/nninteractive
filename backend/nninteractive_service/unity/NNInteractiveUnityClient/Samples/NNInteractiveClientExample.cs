@@ -79,7 +79,7 @@ public class NNInteractiveClientExample : MonoBehaviour
             currentRevision,
             new VoxelPointZYX(pointZ, pointY, pointX),
             positive,
-            job => submitJob = job,
+            job => { submitJob = job; },
             err => Debug.LogError("SubmitPointPrompt failed: " + err));
 
         if (submitJob == null)
@@ -90,7 +90,7 @@ public class NNInteractiveClientExample : MonoBehaviour
         JobResponse finalJob = null;
         yield return client.WaitForJob(
             submitJob.job_id,
-            job => finalJob = job,
+            job => { finalJob = job; },
             err => Debug.LogError("WaitForJob failed: " + err));
 
         if (finalJob == null || finalJob.state != "succeeded")
