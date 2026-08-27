@@ -42,6 +42,16 @@ namespace NNInteractiveUnity
         public string mode = "nninteractive";
     }
 
+    public static class NNInteractiveSessionStages
+    {
+        public const string Created = "created";
+        public const string LoadingModel = "loading_model";
+        public const string LoadingImage = "loading_image";
+        public const string Ready = "ready";
+        public const string Error = "error";
+        public const string Closed = "closed";
+    }
+
     [Serializable]
     public class SessionResponse
     {
@@ -49,6 +59,9 @@ namespace NNInteractiveUnity
         public string case_id;
         public string user_id;
         public string state;
+        public string stage;
+        public float progress;
+        public string message;
         public ImageInfo image;
         public string created_at;
         public string updated_at;
@@ -106,6 +119,7 @@ namespace NNInteractiveUnity
         public string state;
         public int base_revision;
         public float progress;
+        public string stage;
         public string message;
         public int result_revision;
         public string result_mask_id;

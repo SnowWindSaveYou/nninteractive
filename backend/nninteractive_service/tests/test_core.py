@@ -29,6 +29,32 @@ class SlowMockInferenceEngine(MockInferenceEngine):
 
 
 class CoreServiceTests(unittest.TestCase):
+    def test_explicit_session_load_reports_stages_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = SegmentationService(Storage(Path(tmp)), MockInferenceEngine())
+            service.register_case("case_001", "mock://demo", [8, 16, 16], None, None, None)
+            session = service.create_session("case_001", "tester")
+            self.assertEqual(session.stage.value, "created")
+            queue = service.subscribe_events(session.session_id)
+            self.assertEqual(queue.get(timeout=1)["event"], "session.connected")
+
+            loading = service.load_session(session.session_id)
+            self.assertEqual(loading.state.value, "loading")
+            self.assertIn(loading.stage.value, ("loading_model", "loading_image", "ready"))
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                loaded = service.get_session(session.session_id)
+                if loaded.state.value != "loading":
+                    break
+                time.sleep(0.01)
+            loaded = service.get_session(session.session_id)
+            self.assertEqual(loaded.state.value, "ready")
+            self.assertEqual(loaded.stage.value, "ready")
+            self.assertEqual(loaded.progress, 1.0)
+            self.assertEqual(service.load_session(session.session_id).stage.value, "ready")
+            self.assertEqual(queue.get(timeout=1)["event"], "session.updated")
+            service.unsubscribe_events(session.session_id, queue)
+
     def test_point_prompt_generates_mask(self):
         with tempfile.TemporaryDirectory() as tmp:
             service = SegmentationService(Storage(Path(tmp)), MockInferenceEngine())

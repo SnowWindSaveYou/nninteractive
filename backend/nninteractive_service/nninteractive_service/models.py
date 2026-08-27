@@ -17,8 +17,19 @@ class CaseState(str, Enum):
 
 class SessionState(str, Enum):
     CREATED = "created"
+    LOADING = "loading"
     READY = "ready"
     INFERENCING = "inferencing"
+    ERROR = "error"
+    CLOSED = "closed"
+
+
+class SessionStage(str, Enum):
+    CREATED = "created"
+    LOADING_MODEL = "loading_model"
+    LOADING_IMAGE = "loading_image"
+    RUNNING_INFERENCE = "running_inference"
+    READY = "ready"
     ERROR = "error"
     CLOSED = "closed"
 
@@ -98,6 +109,9 @@ class SessionRecord:
     case_id: str
     user_id: str | None
     state: SessionState
+    stage: SessionStage
+    progress: float
+    message: str
     image: ImageMetadata
     segments: dict[str, SegmentRecord] = field(default_factory=dict)
     active_segment_id: str | None = None
@@ -116,6 +130,7 @@ class JobRecord:
     base_revision: int
     request_seq: int = 0
     progress: float = 0.0
+    stage: str = "queued"
     message: str = ""
     result_revision: int | None = None
     result_mask_id: str | None = None

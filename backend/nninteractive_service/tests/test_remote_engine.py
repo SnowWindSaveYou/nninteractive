@@ -67,6 +67,7 @@ class RemoteEngineTests(unittest.TestCase):
             image=ImageMetadata(shape_zyx=[4, 5, 6]),
         )
         engine.create_session(context)
+        engine.load_image("sess_1", [4, 5, 6])
         remote = factory.created[0]
         prompts = [
             PromptRecord(

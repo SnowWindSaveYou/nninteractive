@@ -104,6 +104,10 @@ def create_app() -> FastAPI:
     def create_session(payload: SessionCreateRequest):
         return to_dict(service.create_session(case_id=payload.case_id, user_id=payload.user_id))
 
+    @app.post(f"{prefix}/sessions/{{session_id}}/load")
+    def load_session(session_id: str):
+        return to_dict(service.load_session(session_id))
+
     @app.get(f"{prefix}/sessions/{{session_id}}")
     def get_session(session_id: str):
         return to_dict(service.get_session(session_id))

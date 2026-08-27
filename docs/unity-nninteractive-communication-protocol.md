@@ -403,7 +403,42 @@ POST /sessions
 }
 ```
 
-### 8.2 获取 Session
+### 8.2 显式加载 Session 模型与影像
+
+```http
+POST /sessions/{session_id}/load
+```
+
+该接口幂等地触发 session 的模型初始化和影像读取、转换及上传。创建 session 不会触发影像加载，Unity 可在打开分割功能时主动调用该接口，避免首次 prompt 时发生不可见的长等待。
+
+响应使用与 `GET /sessions/{session_id}` 相同的 Session 对象，并包含准备阶段字段：
+
+```json
+{
+  "session_id": "sess_001",
+  "state": "ready",
+  "stage": "ready",
+  "progress": 1.0,
+  "message": "session ready"
+}
+```
+
+`stage` 取值：
+
+| stage | 含义 |
+|---|---|
+| `created` | session 已创建，尚未开始显式加载 |
+| `loading_model` | 正在加载/初始化模型 |
+| `loading_image` | 正在读取、转换并设置影像数据 |
+| `ready` | 模型和影像均已就绪，可以提交 prompt |
+| `error` | 加载失败，具体原因见 `message` |
+| `closed` | session 已关闭 |
+
+加载期间 `state` 为 `loading`，`progress` 仅表示准备阶段的粗粒度进度：模型阶段为 `0.0`，影像阶段为 `0.5`，完成为 `1.0`，不代表底层 IO 的精确百分比。加载失败时 `state` 为 `error`。重复调用已完成的接口直接返回 `ready`，不会重复上传影像。
+
+加载期间创建 segment 或提交 prompt 会返回 `SESSION_NOT_READY`。已有懒加载调用仍兼容：未调用该接口时，首次 prompt 仍会自动完成准备。
+
+### 8.3 获取 Session
 
 ```http
 GET /sessions/{session_id}

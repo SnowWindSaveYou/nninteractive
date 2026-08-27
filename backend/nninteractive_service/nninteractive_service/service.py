@@ -3,7 +3,9 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from queue import Queue
+import logging
 import threading
+import time
 import uuid
 
 import numpy as np
@@ -21,10 +23,14 @@ from .models import (
     SegmentRecord,
     SegmentState,
     SessionRecord,
+    SessionStage,
     SessionState,
     utc_now,
 )
 from .storage import Storage
+
+
+logger = logging.getLogger(__name__)
 
 
 class SegmentationService:
@@ -81,12 +87,66 @@ class SegmentationService:
             case_id=case_id,
             user_id=user_id,
             state=SessionState.READY,
+            stage=SessionStage.CREATED,
+            progress=0.0,
+            message="session created; loading has not started",
             image=case.image,
         )
         self.engine.create_session(InferenceContext(session_id=session_id, case_id=case_id, image_uri=case.image_uri, image=case.image))
         with self._lock:
             self.sessions[session_id] = record
         return record
+
+    def load_session(self, session_id: str) -> SessionRecord:
+        session = self.get_session(session_id)
+        with self._lock:
+            if session.state == SessionState.CLOSED:
+                raise conflict("SESSION_CLOSED", "session is closed", {"session_id": session_id})
+            if session.state == SessionState.LOADING:
+                return session
+            if session.state == SessionState.READY and session.stage == SessionStage.READY:
+                return session
+            session.state = SessionState.LOADING
+            session.stage = SessionStage.LOADING_MODEL
+            session.progress = 0.0
+            session.message = "loading model"
+            session.updated_at = utc_now()
+            self._publish_session_updated_locked(session)
+            self._executor.submit(self._load_session, session_id)
+        return session
+
+    def _load_session(self, session_id: str) -> None:
+        session = self.get_session(session_id)
+        started = time.perf_counter()
+        try:
+            self.engine.load_model(session_id)
+            with self._lock:
+                session.stage = SessionStage.LOADING_IMAGE
+                session.progress = 0.5
+                session.message = "loading image"
+                session.updated_at = utc_now()
+                self._publish_session_updated_locked(session)
+            self.engine.load_image(session_id, session.image.shape_zyx)
+        except Exception as exc:
+            with self._lock:
+                session.state = SessionState.ERROR
+                session.stage = SessionStage.ERROR
+                session.progress = 1.0
+                session.message = str(exc)
+                session.updated_at = utc_now()
+                self._publish_session_updated_locked(session)
+            logger.exception("nnInteractive session load failed session_id=%s", session_id)
+            return
+
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        with self._lock:
+            session.state = SessionState.READY
+            session.stage = SessionStage.READY
+            session.progress = 1.0
+            session.message = "session ready"
+            session.updated_at = utc_now()
+            self._publish_session_updated_locked(session)
+        logger.info("nnInteractive session loaded session_id=%s elapsed_ms=%.1f", session_id, elapsed_ms)
 
     def get_session(self, session_id: str) -> SessionRecord:
         with self._lock:
@@ -203,6 +263,7 @@ class SegmentationService:
                 base_revision=base_revision,
                 request_seq=request_seq,
                 message="queued",
+                stage="queued",
             )
             segment.prompts.extend(prompts)
             segment.latest_job_id = job.job_id
@@ -214,6 +275,7 @@ class SegmentationService:
                 "segment_id": segment_id,
                 "status": job.state.value,
                 "progress": job.progress,
+                "stage": job.stage,
                 "message": job.message,
             })
         if run_inference:
@@ -222,8 +284,10 @@ class SegmentationService:
             with self._lock:
                 job.state = JobState.SUCCEEDED
                 job.progress = 1.0
+                job.stage = "finished"
                 job.message = "prompts accepted without inference"
                 job.finished_at = utc_now()
+                self._publish_job_updated_locked(job)
         return job
 
     def get_job(self, job_id: str) -> JobRecord:
@@ -251,6 +315,7 @@ class SegmentationService:
                 "segment_id": job.segment_id,
                 "status": job.state.value,
                 "progress": job.progress,
+                "stage": job.stage,
                 "message": job.message,
             })
             return job
@@ -276,22 +341,26 @@ class SegmentationService:
             if job.request_seq != segment.latest_request_seq or segment.latest_job_id != job.job_id:
                 job.state = JobState.STALE
                 job.progress = 1.0
+                job.stage = "finished"
                 job.message = "stale"
                 job.finished_at = utc_now()
                 return
             job.state = JobState.RUNNING
             job.started_at = utc_now()
             job.progress = 0.1
+            job.stage = "running_inference"
             job.message = "running inference"
             self._publish_event_locked(job.session_id, "job.updated", {
                 "job_id": job.job_id,
                 "segment_id": job.segment_id,
                 "status": job.state.value,
                 "progress": job.progress,
+                "stage": job.stage,
                 "message": job.message,
             })
             previous_mask = self._mask_arrays.get(segment.current_mask_id) if segment.current_mask_id else None
 
+        inference_started = time.perf_counter()
         try:
             mask = self.engine.run_prompts(
                 session_id=job.session_id,
@@ -299,6 +368,15 @@ class SegmentationService:
                 shape_zyx=session.image.shape_zyx,
                 prompts=new_prompts,
                 previous_mask=previous_mask,
+            )
+            inference_elapsed_ms = (time.perf_counter() - inference_started) * 1000
+            logger.info(
+                "nnInteractive inference finished job_id=%s session_id=%s segment_id=%s prompts=%d elapsed_ms=%.1f",
+                job.job_id,
+                job.session_id,
+                job.segment_id,
+                len(new_prompts),
+                inference_elapsed_ms,
             )
             revision = job.base_revision + 1
             with self._lock:
@@ -321,6 +399,11 @@ class SegmentationService:
                         segment.state = SegmentState.READY if segment.current_mask_id else SegmentState.HAS_PROMPTS
                     return
             mask_id = self._id("mask")
+            with self._lock:
+                job.stage = "saving_mask"
+                job.progress = 0.9
+                job.message = "saving mask"
+                self._publish_job_updated_locked(job)
             record = self.storage.save_mask_raw_gzip(mask_id, job.session_id, job.segment_id, revision, mask, job_id)
             with self._lock:
                 self._mask_arrays[mask_id] = mask
@@ -340,6 +423,7 @@ class SegmentationService:
                     "segment_id": job.segment_id,
                     "status": job.state.value,
                     "progress": job.progress,
+                    "stage": job.stage,
                     "message": job.message,
                 })
                 self._publish_event_locked(job.session_id, "segment.updated", {
@@ -354,6 +438,13 @@ class SegmentationService:
                     "mask_id": mask_id,
                 })
         except Exception as exc:  # noqa: BLE001
+            inference_elapsed_ms = (time.perf_counter() - inference_started) * 1000
+            logger.exception(
+                "nnInteractive inference failed job_id=%s session_id=%s elapsed_ms=%.1f",
+                job.job_id,
+                job.session_id,
+                inference_elapsed_ms,
+            )
             with self._lock:
                 latest = job.request_seq == segment.latest_request_seq and segment.latest_job_id == job.job_id
                 if job.state in (JobState.CANCEL_REQUESTED, JobState.CANCELED) or not latest:
@@ -381,6 +472,7 @@ class SegmentationService:
                     "segment_id": job.segment_id,
                     "status": job.state.value,
                     "progress": job.progress,
+                    "stage": job.stage,
                     "message": job.message,
                 })
                 self._publish_event_locked(job.session_id, "error", {
@@ -485,6 +577,24 @@ class SegmentationService:
             session.event_sequence += 1
             sequence = session.event_sequence
         return {"event": event, "sequence": sequence, "session_id": session_id, "payload": payload}
+
+    def _publish_job_updated_locked(self, job: JobRecord) -> None:
+        self._publish_event_locked(job.session_id, "job.updated", {
+            "job_id": job.job_id,
+            "segment_id": job.segment_id,
+            "status": job.state.value,
+            "progress": job.progress,
+            "stage": job.stage,
+            "message": job.message,
+        })
+
+    def _publish_session_updated_locked(self, session: SessionRecord) -> None:
+        self._publish_event_locked(session.session_id, "session.updated", {
+            "state": session.state.value,
+            "stage": session.stage.value,
+            "progress": session.progress,
+            "message": session.message,
+        })
 
     def _cancel_segment_jobs_locked(self, segment: SegmentRecord, exclude_job_id: str | None) -> None:
         for job in self.jobs.values():

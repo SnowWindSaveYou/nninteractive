@@ -11,6 +11,7 @@ namespace NNInteractiveUnity
         public string BaseUrl { get; }
         public float PollIntervalSeconds { get; set; } = 0.25f;
         public float DefaultTimeoutSeconds { get; set; } = 180f;
+        public float LoadTimeoutSeconds { get; set; } = 600f;
 
         /// <summary>
         /// Image metadata (origin/spacing/direction/shape) of the current session,
@@ -71,6 +72,75 @@ namespace NNInteractiveUnity
         {
             var req = new SegmentResetRequest { clear_prompts = clearPrompts, clear_masks = clearMasks };
             yield return SendJson($"/sessions/{sessionId}/segments/{segmentId}/reset", JsonUtility.ToJson(req), onSuccess, onError);
+        }
+
+        /// <summary>Explicitly loads the model and image for a session, returning each stage in SessionResponse.</summary>
+        public IEnumerator LoadSession(string sessionId, Action<SessionResponse> onSuccess, Action<string> onError)
+        {
+            SessionResponse captured = null;
+            yield return SendJson($"/sessions/{sessionId}/load", "{}",
+                res => captured = res,
+                err => { onError?.Invoke(err); });
+            if (captured != null)
+            {
+                SessionImage = captured.image ?? SessionImage;
+                onSuccess?.Invoke(captured);
+            }
+        }
+
+        /// <summary>Loads a session and polls until it reaches a terminal state.</summary>
+        public IEnumerator LoadSessionAndWait(string sessionId, Action<SessionResponse> onSuccess, Action<string> onError, float timeoutSeconds = -1f)
+        {
+            SessionResponse requested = null;
+            string requestError = null;
+            yield return LoadSession(sessionId, s => requested = s, e => requestError = e);
+            if (!string.IsNullOrEmpty(requestError))
+            {
+                onError?.Invoke(requestError);
+                yield break;
+            }
+            if (requested == null)
+            {
+                onError?.Invoke($"Session load returned no response: {sessionId}");
+                yield break;
+            }
+            if (requested.state == "ready")
+            {
+                onSuccess?.Invoke(requested);
+                yield break;
+            }
+
+            if (requested.state == "error" || requested.state == "closed")
+            {
+                onError?.Invoke($"Session load failed: {requested.message}");
+                yield break;
+            }
+
+            var deadline = Time.realtimeSinceStartup + (timeoutSeconds > 0 ? timeoutSeconds : LoadTimeoutSeconds);
+            while (Time.realtimeSinceStartup < deadline)
+            {
+                SessionResponse session = null;
+                string error = null;
+                yield return GetSession(sessionId, s => session = s, e => error = e);
+                if (!string.IsNullOrEmpty(error))
+                {
+                    onError?.Invoke(error);
+                    yield break;
+                }
+                if (session != null && session.state == "ready")
+                {
+                    SessionImage = session.image ?? SessionImage;
+                    onSuccess?.Invoke(session);
+                    yield break;
+                }
+                if (session != null && (session.state == "error" || session.state == "closed"))
+                {
+                    onError?.Invoke($"Session load failed: {session.message}");
+                    yield break;
+                }
+                yield return new WaitForSeconds(PollIntervalSeconds);
+            }
+            onError?.Invoke($"Session load timeout: {sessionId}");
         }
 
         /// <summary>Query a session's current state (segments, active segment, revision).</summary>
@@ -182,7 +252,7 @@ namespace NNInteractiveUnity
                     yield break;
                 }
 
-                if (job != null && (job.state == "succeeded" || job.state == "failed" || job.state == "canceled"))
+                if (job != null && (job.state == "succeeded" || job.state == "failed" || job.state == "canceled" || job.state == "stale"))
                 {
                     onSuccess?.Invoke(job);
                     yield break;

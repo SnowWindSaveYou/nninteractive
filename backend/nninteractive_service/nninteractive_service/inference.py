@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import logging
+import time
 from typing import Any
 
 import numpy as np
@@ -17,6 +19,9 @@ from .transforms import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class InferenceContext:
     session_id: str
@@ -28,6 +33,14 @@ class InferenceContext:
 class InferenceEngine(ABC):
     @abstractmethod
     def create_session(self, context: InferenceContext) -> None:
+        pass
+
+    @abstractmethod
+    def load_model(self, session_id: str) -> None:
+        pass
+
+    @abstractmethod
+    def load_image(self, session_id: str, shape_zyx: list[int]) -> None:
         pass
 
     @abstractmethod
@@ -63,9 +76,16 @@ class MockInferenceEngine(InferenceEngine):
     def create_session(self, context: InferenceContext) -> None:
         self.sessions[context.session_id] = context
 
+    def load_model(self, session_id: str) -> None:
+        if session_id not in self.sessions:
+            raise RuntimeError(f"Unknown mock nnInteractive session: {session_id}")
+
+    def load_image(self, session_id: str, shape_zyx: list[int]) -> None:
+        if session_id not in self.sessions:
+            raise RuntimeError(f"Unknown mock nnInteractive session: {session_id}")
+
     def close_session(self, session_id: str) -> None:
         self.sessions.pop(session_id, None)
-
     def reset_segment(self, session_id: str, segment_id: str, shape_zyx: list[int]) -> np.ndarray:
         return np.zeros(shape_zyx, dtype=np.uint8)
 
@@ -130,13 +150,42 @@ class LocalNNInteractiveEngine(InferenceEngine):
     def create_session(self, context: InferenceContext) -> None:
         if not self.model_dir:
             raise RuntimeError("NNInteractive model_dir is required for local engine")
-        session = self._session_cls(device=self._torch.device(self.device))
-        session.initialize_from_trained_model_folder(self.model_dir)
         self.sessions[context.session_id] = {
             "context": context,
-            "session": session,
+            "session": None,
             "image_loaded": False,
         }
+
+    def load_model(self, session_id: str) -> None:
+        entry = self._entry(session_id)
+        if entry["session"] is not None:
+            return
+        if not self.model_dir:
+            raise RuntimeError("NNInteractive model_dir is required for local engine")
+        started = time.perf_counter()
+        session = self._session_cls(device=self._torch.device(self.device))
+        session.initialize_from_trained_model_folder(self.model_dir)
+        entry["session"] = session
+        logger.info(
+            "nnInteractive model loaded session_id=%s model_dir=%s elapsed_ms=%.1f",
+            session_id,
+            self.model_dir,
+            (time.perf_counter() - started) * 1000,
+        )
+
+    def load_image(self, session_id: str, shape_zyx: list[int]) -> None:
+        entry = self._entry(session_id)
+        if entry["image_loaded"]:
+            return
+        self.load_model(session_id)
+        started = time.perf_counter()
+        self._ensure_image_loaded(entry, shape_zyx)
+        logger.info(
+            "nnInteractive image loaded session_id=%s shape_zyx=%s elapsed_ms=%.1f",
+            session_id,
+            shape_zyx,
+            (time.perf_counter() - started) * 1000,
+        )
 
     def close_session(self, session_id: str) -> None:
         entry = self.sessions.pop(session_id, None)
@@ -160,8 +209,8 @@ class LocalNNInteractiveEngine(InferenceEngine):
         previous_mask: np.ndarray | None,
     ) -> np.ndarray:
         entry = self._entry(session_id)
+        self.load_image(session_id, shape_zyx)
         session = entry["session"]
-        self._ensure_image_loaded(entry, shape_zyx)
         target = np.zeros(tuple(reversed(shape_zyx)), dtype=np.uint8)
         if previous_mask is not None:
             target[:] = mask_zyx_to_nninteractive_target(previous_mask)
@@ -226,6 +275,31 @@ class RemoteNNInteractiveEngine(InferenceEngine):
             "image_loaded": False,
         }
 
+    def load_model(self, session_id: str) -> None:
+        if session_id not in self.sessions:
+            raise RuntimeError(f"Unknown remote nnInteractive session: {session_id}")
+
+    def load_image(self, session_id: str, shape_zyx: list[int]) -> None:
+        entry = self._entry(session_id)
+        if entry["image_loaded"]:
+            return
+        started = time.perf_counter()
+        context = entry["context"]
+        volume_zyx = load_volume_zyx(context.image_uri, shape_zyx)
+        image_cxyz = volume_zyx_to_nninteractive_image(volume_zyx)
+        entry["session"].set_image(image_cxyz, image_properties={
+            "spacing_xyz": context.image.spacing_xyz,
+            "origin_xyz": context.image.origin_xyz,
+            "direction_3x3": context.image.direction_3x3,
+        })
+        entry["image_loaded"] = True
+        logger.info(
+            "nnInteractive image loaded session_id=%s shape_zyx=%s elapsed_ms=%.1f",
+            session_id,
+            shape_zyx,
+            (time.perf_counter() - started) * 1000,
+        )
+
     def close_session(self, session_id: str) -> None:
         entry = self.sessions.pop(session_id, None)
         if entry is not None and hasattr(entry["session"], "close"):
@@ -245,8 +319,8 @@ class RemoteNNInteractiveEngine(InferenceEngine):
         previous_mask: np.ndarray | None,
     ) -> np.ndarray:
         entry = self._entry(session_id)
+        self.load_image(session_id, shape_zyx)
         remote = entry["session"]
-        self._ensure_image_loaded(entry, shape_zyx)
         target = np.zeros(tuple(reversed(shape_zyx)), dtype=np.uint8)
         if previous_mask is not None:
             target[:] = mask_zyx_to_nninteractive_target(previous_mask)
