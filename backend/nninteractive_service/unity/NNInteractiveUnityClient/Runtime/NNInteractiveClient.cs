@@ -292,6 +292,19 @@ namespace NNInteractiveUnity
                     var shape = NNInteractiveMaskCodec.ParseShapeZYX(req.GetResponseHeader("X-Mask-Shape-ZYX"));
                     NNInteractiveMaskCodec.ValidateRawMaskLength(raw, shape);
                     var revisionHeader = req.GetResponseHeader("X-Mask-Revision");
+                    // Flip X and Y to match Unity-internal voxel layout.
+                    //
+                    // The backend stores the mask in the same layout as the source
+                    // NIfTI (C-order ZYX, x fastest). NiftiImporter flips X and Y
+                    // when loading the volume into Unity (it reverses each slice to
+                    // undo TPS Java's reverse pixel writing), so Unity-internal
+                    // voxel (x,y,z) corresponds to NIfTI voxel (dimX-1-x,
+                    // dimY-1-y, z). Without this flip the mask would be mirrored
+                    // in X and Y relative to the Unity volume.
+                    //
+                    // Done here (in the plugin) so all callers receive a mask that
+                    // already matches Unity's voxel layout.
+                    raw = FlipXY(raw, shape);
                     var result = new DownloadedMask
                     {
                         maskId = req.GetResponseHeader("X-Mask-Id") ?? maskId,
@@ -306,6 +319,32 @@ namespace NNInteractiveUnity
                     onError?.Invoke(ex.Message);
                 }
             }
+        }
+
+        /// <summary>
+        /// Flip a ZYX uint8 mask in X and Y (reverse within each axial slice),
+        /// undoing the NIfTI-vs-Unity voxel-layout mismatch (see NiftiImporter's
+        /// per-slice reversal). Z is untouched. Returns a new buffer.
+        /// </summary>
+        private static byte[] FlipXY(byte[] raw, int[] shape)
+        {
+            var zDim = shape[0];
+            var yDim = shape[1];
+            var xDim = shape[2];
+            var flipped = new byte[raw.Length];
+            for (int z = 0; z < zDim; z++)
+            {
+                for (int y = 0; y < yDim; y++)
+                {
+                    for (int x = 0; x < xDim; x++)
+                    {
+                        int srcIndex = z * yDim * xDim + y * xDim + x;
+                        int dstIndex = z * yDim * xDim + (yDim - 1 - y) * xDim + (xDim - 1 - x);
+                        flipped[dstIndex] = raw[srcIndex];
+                    }
+                }
+            }
+            return flipped;
         }
 
         private IEnumerator SendGet<T>(string path, Action<T> onSuccess, Action<string> onError)

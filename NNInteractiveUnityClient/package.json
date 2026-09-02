@@ -1,0 +1,26 @@
+{
+  "name": "com.nninteractive.unity-client",
+  "version": "0.1.0",
+  "displayName": "NNInteractive Unity Client",
+  "description": "Unity client for the nnInteractive AI segmentation backend.",
+  "unity": "2021.3",
+  "dependencies": {
+    "com.unity.modules.unitywebrequest": "1.0.0"
+  },
+  "keywords": [
+    "nninteractive",
+    "segmentation",
+    "ai",
+    "medical"
+  ],
+  "samples": [
+    {
+      "displayName": "Client Usage Example",
+      "description": "A MonoBehaviour demo showing the full create-session -> segment -> poll -> load-mask flow.",
+      "path": "Samples~"
+    }
+  ],
+  "author": {
+    "name": "SnowWindSaveYou"
+  }
+}

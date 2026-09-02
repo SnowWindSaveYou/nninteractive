@@ -5,6 +5,28 @@ import os
 from pathlib import Path
 
 
+# Directory that holds the .env file and the on-disk model/data folders.
+# Relative paths in config are resolved against this so the service works no
+# matter what working directory uvicorn is launched from.
+_SERVICE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _resolve_path(value: str | None) -> str | None:
+    """Resolve a possibly-relative config path to an absolute one.
+
+    Relative paths are anchored at the service directory (where .env lives),
+    NOT the process working directory. nnInteractive looks up model metadata
+    via os.path.isfile, so a relative model_dir silently breaks when the server
+    is launched from a different CWD (FileNotFoundError on inference_info.json).
+    """
+    if not value:
+        return value
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = _SERVICE_DIR / path
+    return str(path)
+
+
 def _load_dotenv(env_path: Path | None = None) -> None:
     """Load KEY=VALUE pairs from a .env file into os.environ.
 
@@ -14,7 +36,7 @@ def _load_dotenv(env_path: Path | None = None) -> None:
     Zero-dependency: no python-dotenv. Minimal parsing — strips comments and
     surrounding quotes, skips blank/malformed lines.
     """
-    path = env_path or Path(__file__).resolve().parent.parent / ".env"
+    path = env_path or _SERVICE_DIR / ".env"
     if not path.is_file():
         return
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -43,7 +65,7 @@ class Settings:
     engine: str = os.environ.get("NNINTERACTIVE_BACKEND_ENGINE", "mock")
     mock_default_shape_zyx: tuple[int, int, int] = (64, 128, 128)
     session_ttl_seconds: int = int(os.environ.get("NNINTERACTIVE_BACKEND_SESSION_TTL", "3600"))
-    local_model_dir: str | None = os.environ.get("NNINTERACTIVE_BACKEND_LOCAL_MODEL_DIR")
+    local_model_dir: str | None = _resolve_path(os.environ.get("NNINTERACTIVE_BACKEND_LOCAL_MODEL_DIR"))
     local_device: str = os.environ.get("NNINTERACTIVE_BACKEND_LOCAL_DEVICE", "cuda")
     remote_server_url: str | None = os.environ.get("NNINTERACTIVE_BACKEND_REMOTE_URL")
     remote_api_key: str | None = os.environ.get("NNINTERACTIVE_BACKEND_REMOTE_API_KEY")
