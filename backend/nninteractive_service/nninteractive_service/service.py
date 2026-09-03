@@ -224,6 +224,20 @@ class SegmentationService:
             self._cancel_segment_jobs_locked(segment, exclude_job_id=None)
             segment.updated_at = utc_now()
             session.updated_at = utc_now()
+        # Reset the engine's internal interaction state too. The service-level clear
+        # above only drops our CPU-side prompt/mask records; the nnInteractive
+        # inference session still holds every add_point/bbox_interaction it has seen
+        # and models the OUTPUT on those, so without resetting the engine the old
+        # (reset) prompts keep influencing the next segmentation. Matches the
+        # run_prompts pattern of calling the engine outside the lock.
+        if clear_prompts:
+            try:
+                self.engine.reset_segment(session_id, segment_id, session.image.shape_zyx)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "engine.reset_segment failed session_id=%s segment_id=%s: %s",
+                    session_id, segment_id, exc,
+                )
         return segment
 
     def submit_prompts(
