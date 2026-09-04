@@ -182,7 +182,12 @@ curl http://127.0.0.1:18080/api/v1/health
 # {"status":"ok","engine":"local",...}
 ```
 
-## 步骤 6:防火墙 / 端口(对外服务时)
+# 5.启动时模型预加载
+
+local 模式下 backend 启动阶段会加载 checkpoint、初始化共享模型并执行一次 warmup。服务进程必须使用单个 worker；多个 Unity 进程应连接同一个 backend 地址，不要通过多个 Uvicorn worker 复制模型。
+
+模型加载或 warmup 失败会阻止 backend 进入可服务状态。Unity 连接后仍应先调用 `LoadSessionAndWait`，该步骤负责加载当前 case 的影像和 session 状态，不会再次加载模型。
+
 
 Windows:
 ```powershell

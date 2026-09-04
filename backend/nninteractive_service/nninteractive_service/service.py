@@ -46,6 +46,14 @@ class SegmentationService:
         self._lock = threading.RLock()
         self._executor = ThreadPoolExecutor(max_workers=1)
 
+    def shutdown(self) -> None:
+        for session_id in list(self.sessions):
+            try:
+                self.close_session(session_id)
+            except Exception:
+                logger.exception("failed to close session during shutdown session_id=%s", session_id)
+        self._executor.shutdown(wait=True)
+
     def register_case(
         self,
         case_id: str,

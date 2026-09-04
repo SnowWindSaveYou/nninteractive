@@ -56,6 +56,11 @@ public class NNInteractiveClientExample : MonoBehaviour
             },
             err => Debug.LogError("CreateSession failed: " + err));
 
+        yield return client.LoadSessionAndWait(
+            sessionId,
+            res => Debug.Log($"Session ready: {res.session_id}"),
+            err => Debug.LogError("LoadSession failed: " + err));
+
         yield return client.CreateSegment(
             sessionId,
             new SegmentCreateRequest { name = "unity_segment", label = 1, color = new[] { 1f, 0.2f, 0.1f, 0.5f } },

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
@@ -25,7 +26,16 @@ def create_app() -> FastAPI:
     )
     service = SegmentationService(storage=storage, engine=engine)
 
-    app = FastAPI(title="nnInteractive Unity Backend", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        engine.startup()
+        try:
+            yield
+        finally:
+            service.shutdown()
+            engine.shutdown()
+
+    app = FastAPI(title="nnInteractive Unity Backend", version="0.1.0", lifespan=lifespan)
     app.state.service = service
 
     @app.exception_handler(ServiceError)
@@ -45,12 +55,22 @@ def create_app() -> FastAPI:
 
     @app.get(f"{prefix}/health")
     def health():
+        model = {"name": "nnInteractive", **engine.readiness()}
         return {
             "status": "ok",
             "version": "0.1.0",
             "engine": settings.engine,
-            "model": {"name": "nnInteractive", "ready": settings.engine == "mock", "version": "mock" if settings.engine == "mock" else "unknown"},
+            "model": model,
         }
+
+    @app.get(f"{prefix}/ready")
+    def readiness():
+        body = {
+            "status": "ready" if engine.readiness()["ready"] else "not_ready",
+            "engine": settings.engine,
+            "model": {"name": "nnInteractive", **engine.readiness()},
+        }
+        return body
 
     @app.get(f"{prefix}/debug/config")
     def debug_config():

@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import logging
+import threading
 import time
 from typing import Any
 
@@ -31,6 +32,15 @@ class InferenceContext:
 
 
 class InferenceEngine(ABC):
+    def startup(self) -> None:
+        """Initialize process-wide inference resources before serving requests."""
+
+    def shutdown(self) -> None:
+        """Release process-wide and per-session inference resources."""
+
+    def readiness(self) -> dict[str, object]:
+        return {"ready": True, "state": "ready"}
+
     @abstractmethod
     def create_session(self, context: InferenceContext) -> None:
         pass
@@ -72,6 +82,15 @@ class MockInferenceEngine(InferenceEngine):
 
     def __init__(self) -> None:
         self.sessions: dict[str, InferenceContext] = {}
+
+    def startup(self) -> None:
+        pass
+
+    def shutdown(self) -> None:
+        self.sessions.clear()
+
+    def readiness(self) -> dict[str, object]:
+        return {"ready": True, "state": "ready", "artifacts_loaded": True, "warmed_up": True}
 
     def create_session(self, context: InferenceContext) -> None:
         self.sessions[context.session_id] = context
@@ -136,6 +155,10 @@ class LocalNNInteractiveEngine(InferenceEngine):
         self.model_dir = model_dir
         self.device = device
         self.sessions: dict[str, Any] = {}
+        self._artifacts: dict[str, Any] | None = None
+        self._model_state = "not_loaded"
+        self._model_error: str | None = None
+        self._model_lock = threading.RLock()
         try:
             import torch  # type: ignore
             from nnInteractive.inference.inference_session import nnInteractiveInferenceSession  # type: ignore
@@ -147,31 +170,78 @@ class LocalNNInteractiveEngine(InferenceEngine):
         self._torch = torch
         self._session_cls = nnInteractiveInferenceSession
 
-    def create_session(self, context: InferenceContext) -> None:
-        if not self.model_dir:
-            raise RuntimeError("NNInteractive model_dir is required for local engine")
-        self.sessions[context.session_id] = {
-            "context": context,
-            "session": None,
-            "image_loaded": False,
-        }
-
-    def load_model(self, session_id: str) -> None:
-        entry = self._entry(session_id)
-        if entry["session"] is not None:
+    def startup(self) -> None:
+        if self._artifacts is not None:
             return
         if not self.model_dir:
             raise RuntimeError("NNInteractive model_dir is required for local engine")
-        started = time.perf_counter()
-        session = self._session_cls(device=self._torch.device(self.device))
-        session.initialize_from_trained_model_folder(self.model_dir)
-        entry["session"] = session
-        logger.info(
-            "nnInteractive model loaded session_id=%s model_dir=%s elapsed_ms=%.1f",
-            session_id,
-            self.model_dir,
-            (time.perf_counter() - started) * 1000,
-        )
+        with self._model_lock:
+            if self._artifacts is not None:
+                return
+            self._model_state = "loading"
+            self._model_error = None
+            started = time.perf_counter()
+            loader = self._session_cls(device=self._torch.device(self.device))
+            warmup = None
+            try:
+                artifacts = loader._load_model_artifacts_from_disk(self.model_dir)
+                warmup = self._session_cls(device=self._torch.device(self.device))
+                warmup.initialize_from_loaded_artifacts(artifacts)
+                warmup.warmup()
+                artifacts["network"] = warmup.network
+                self._artifacts = artifacts
+                self._model_state = "ready"
+                logger.info(
+                    "nnInteractive shared model ready model_dir=%s elapsed_ms=%.1f",
+                    self.model_dir,
+                    (time.perf_counter() - started) * 1000,
+                )
+            except Exception as exc:
+                self._model_state = "error"
+                self._model_error = str(exc)
+                raise
+            finally:
+                try:
+                    loader.executor.shutdown(wait=False)
+                except Exception:
+                    pass
+                try:
+                    if warmup is not None:
+                        warmup.executor.shutdown(wait=False)
+                except Exception:
+                    pass
+
+    def shutdown(self) -> None:
+        for session_id in list(self.sessions):
+            self.close_session(session_id)
+        self._artifacts = None
+        self._model_state = "not_loaded"
+
+    def readiness(self) -> dict[str, object]:
+        body: dict[str, object] = {
+            "ready": self._model_state == "ready",
+            "state": self._model_state,
+            "artifacts_loaded": self._artifacts is not None,
+            "warmed_up": self._artifacts is not None,
+        }
+        if self._model_error is not None:
+            body["error"] = self._model_error
+        return body
+
+    def create_session(self, context: InferenceContext) -> None:
+        if self._artifacts is None:
+            raise RuntimeError("Local nnInteractive model is not ready")
+        self.sessions[context.session_id] = {
+            "context": context,
+            "session": self._session_cls(device=self._torch.device(self.device)),
+            "image_loaded": False,
+        }
+        self.sessions[context.session_id]["session"].initialize_from_loaded_artifacts(self._artifacts)
+
+    def load_model(self, session_id: str) -> None:
+        self._entry(session_id)
+        if self._artifacts is None:
+            raise RuntimeError("Local nnInteractive model is not ready")
 
     def load_image(self, session_id: str, shape_zyx: list[int]) -> None:
         entry = self._entry(session_id)

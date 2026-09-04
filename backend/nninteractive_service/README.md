@@ -6,7 +6,8 @@
 
 - REST API 路径前缀：`/api/v1`
 - case 注册，支持 `.npy`、`.nii`、`.nii.gz`、NIfTI series 目录
-- session 创建后显式加载模型和影像（`POST /sessions/{session_id}/load`）
+- backend 启动时加载 local 模型一次并执行 warmup；多个业务 session 共享同一份模型权重
+- session 创建后显式加载影像和 session 状态（`POST /sessions/{session_id}/load`）
 - session `state` / `stage` / `progress` / `message` 状态查询
 - segment 创建、重置、active segment 标记
 - point / box prompt 提交
