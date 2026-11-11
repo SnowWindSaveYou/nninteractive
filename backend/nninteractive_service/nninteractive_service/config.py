@@ -61,7 +61,7 @@ _load_dotenv()
 @dataclass(frozen=True)
 class Settings:
     api_prefix: str = "/api/v1"
-    data_dir: Path = Path(os.environ.get("NNINTERACTIVE_BACKEND_DATA_DIR", "/workspace/data/nninteractive_backend"))
+    data_dir: Path = Path(_resolve_path(os.environ.get("NNINTERACTIVE_BACKEND_DATA_DIR", "/workspace/data/nninteractive_backend")))
     engine: str = os.environ.get("NNINTERACTIVE_BACKEND_ENGINE", "mock")
     mock_default_shape_zyx: tuple[int, int, int] = (64, 128, 128)
     session_ttl_seconds: int = int(os.environ.get("NNINTERACTIVE_BACKEND_SESSION_TTL", "3600"))

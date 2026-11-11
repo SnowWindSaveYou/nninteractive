@@ -12,10 +12,15 @@ from .models import MaskRecord
 
 class Storage:
     def __init__(self, root: Path):
-        self.root = root
-        self.cases_dir = root / "cases"
-        self.sessions_dir = root / "sessions"
-        self.masks_dir = root / "masks"
+        # Resolve to absolute so storage never depends on the process working
+        # directory. With engine=local, nnInteractive runs in-process and can
+        # leave the CWD handle invalid, which makes relative-path mkdir fail
+        # with OSError [WinError 6] ("句柄无效"). Anchoring at the resolved
+        # root sidesteps that entirely.
+        self.root = root.resolve()
+        self.cases_dir = self.root / "cases"
+        self.sessions_dir = self.root / "sessions"
+        self.masks_dir = self.root / "masks"
         for path in (self.cases_dir, self.sessions_dir, self.masks_dir):
             path.mkdir(parents=True, exist_ok=True)
 
